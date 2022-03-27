@@ -1,0 +1,8 @@
+[package]
+name = "generate_random_data"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+fasta-util = { path = "../" }
+rand = "0.8"

@@ -1,0 +1,15 @@
+[package]
+name = "fasta-util"
+version = "0.1.0"
+edition = "2021"
+
+[profile.release]
+lto = true
+
+[dependencies]
+clap = { version = "3.1.6", features = ["derive"]}
+crossbeam = "0.8.1"
+memmap = "0.7.0"
+
+[dev-dependencies]
+rand = "0.8"
