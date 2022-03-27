@@ -5,13 +5,13 @@ A CLI tool for playing with FASTA files
 ## Build
 
 ```sh
-cargo build --release
+cargo +nightly build --release
 ```
 
 ## Generate Test Data
 
 ```sh
-cargo run --manifest-path=generate_random_data/Cargo.toml -- 10000 > test.fna
+cargo +nightly run --manifest-path=generate_random_data/Cargo.toml -- 10000 > test.fna
 ```
 
 ## Count the total length of the sequence
