@@ -162,7 +162,7 @@ fn slice(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
                 .open(path)?,
         )
     } else {
-        Box::new(std::io::stdout())
+        Box::new(std::io::stdout().lock())
     };
 
     let mut writer = Writer::new(output, writer_options);
