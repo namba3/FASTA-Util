@@ -40,7 +40,9 @@ SUDKUGDWWTSSYBUCKYUDSAADMMRHMT
 ## Simple tests and benchmarks
 
 OS: Ubuntu (WSL2)
+
 CPU: AMD Ryzen 9 5900X
+
 Test Data: [Homo sapiens](https://www.ncbi.nlm.nih.gov/data-hub/taxonomy/9606/)
 
 ### len
