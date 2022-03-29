@@ -14,7 +14,11 @@ cargo +nightly build --release
 cargo +nightly run --manifest-path=generate_random_data/Cargo.toml -- 10000 > test.fna
 ```
 
-## Count the total length of the sequence
+## Sub Commands
+
+### len
+
+Count the total length of the sequence
 
 ```sh
 ./target/release/fasta-util len -i test.fna
@@ -24,7 +28,9 @@ cargo +nightly run --manifest-path=generate_random_data/Cargo.toml -- 10000 > te
 10000
 ```
 
-## Cut out a part of the sequence
+### slice
+
+Cut out a part of the sequence
 
 ```sh
 ./target/release/fasta-util slice -i test.fna --range 99..=199
