@@ -9,9 +9,9 @@ codegen-units = 1
 lto = true
 
 [dependencies]
-clap = { version = "3.1.6", features = ["derive"]}
-crossbeam = "0.8.1"
-memmap = "0.7.0"
+clap = { version = "3", features = ["derive"]}
+crossbeam = "0.8"
+memmap2 = "0.5"
 
 [dev-dependencies]
 rand = "0.8"

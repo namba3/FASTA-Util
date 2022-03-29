@@ -7,7 +7,7 @@ pub mod nucleic_acid;
 
 pub use nucleic_acid::is_nucleic_acid_lut as is_nucleic_acid;
 
-use core::{ops::Deref, slice};
+use core::slice;
 use std::{
     fs::File,
     io::{BufRead, BufReader},
@@ -24,21 +24,22 @@ pub fn read_lines_from_stdin() -> std::io::Lines<impl BufRead> {
 }
 
 pub fn read_lines_from_file(file: File) -> Result<LinesInFile, std::io::Error> {
-    Ok(SharedMmap::new(file)?.lines())
+    let mmap = unsafe { memmap2::Mmap::map(&file) }?;
+    Ok(lines(mmap))
 }
 
 pub struct LinesInFile {
-    shared_mmap: Arc<SharedMmap>,
+    mmap: Arc<memmap2::Mmap>,
     head: usize,
 }
 impl Iterator for LinesInFile {
     type Item = LineInFile;
     fn next(&mut self) -> Option<Self::Item> {
-        if self.shared_mmap.len() <= self.head {
+        if self.mmap.len() <= self.head {
             return None;
         }
 
-        let line = self.shared_mmap[self.head..]
+        let line = self.mmap[self.head..]
             .split_inclusive(|byte| *byte == b'\n')
             .take(1)
             .last();
@@ -47,7 +48,7 @@ impl Iterator for LinesInFile {
             self.head += line.len();
             let range = line.as_ptr_range();
             LineInFile {
-                _mmap: Arc::clone(&self.shared_mmap),
+                _mmap: Arc::clone(&self.mmap),
                 slice: unsafe { slice::from_ptr_range::<'static, _>(range) },
             }
             .into()
@@ -58,7 +59,7 @@ impl Iterator for LinesInFile {
 }
 #[derive(Clone)]
 pub struct LineInFile {
-    _mmap: Arc<SharedMmap>,
+    _mmap: Arc<memmap2::Mmap>,
     slice: &'static [u8],
 }
 impl AsRef<[u8]> for LineInFile {
@@ -66,28 +67,10 @@ impl AsRef<[u8]> for LineInFile {
         self.slice
     }
 }
-
-struct SharedMmap {
-    mmap: memmap::Mmap,
-    _file: Arc<std::fs::File>,
-}
-impl Deref for SharedMmap {
-    type Target = [u8];
-    fn deref(&self) -> &[u8] {
-        &self.mmap
-    }
-}
-impl<'a> SharedMmap {
-    fn new(file: File) -> Result<Self, std::io::Error> {
-        let _file = Arc::new(file);
-        let mmap = unsafe { memmap::Mmap::map(&*_file) }?;
-        Ok(Self { mmap, _file })
-    }
-    fn lines(self) -> LinesInFile {
-        let mmap = Arc::new(self);
-        LinesInFile {
-            shared_mmap: mmap,
-            head: 0,
-        }
+fn lines(mmap: memmap2::Mmap) -> LinesInFile {
+    let mmap = Arc::new(mmap);
+    LinesInFile {
+        mmap: mmap,
+        head: 0,
     }
 }

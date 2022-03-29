@@ -59,7 +59,7 @@ struct SliceArgs {
         default_value_t = 60,
         help = "Specify the number of characters per line when exporting a sequence"
     )]
-    chars_per_line: u64,
+    chars_per_line: usize,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -123,16 +123,16 @@ fn slice(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
             let start = if start.len() == 0 {
                 None
             } else {
-                Some(start.parse::<u64>()?)
+                Some(start.parse::<usize>()?)
             };
             let end_inclusive = if end.len() == 0 {
                 None
             } else {
                 if end.starts_with("=") {
                     let (_, end) = end.split_once("=").unwrap();
-                    Some(end.parse::<u64>()?)
+                    Some(end.parse::<usize>()?)
                 } else {
-                    Some(end.parse::<u64>()? - 1)
+                    Some(end.parse::<usize>()? - 1)
                 }
             };
 
@@ -213,9 +213,9 @@ fn slice(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 struct WriterOptions {
-    chars_per_line: u64,
-    start: Option<u64>,
-    end_inclusive: Option<u64>,
+    chars_per_line: usize,
+    start: Option<usize>,
+    end_inclusive: Option<usize>,
 }
 struct Writer<T: std::io::Write> {
     inner: BufWriter<T>,
@@ -236,13 +236,13 @@ impl<T: std::io::Write> Writer<T> {
         } = &mut self.options;
         let writer = &mut self.inner;
 
-        let mut cnt = 0u64;
-        let mut written = 0u64;
+        let mut cnt = 0usize;
+        let mut written = 0usize;
 
         while let Ok(buf) = rx.recv() {
             let buf = buf.as_ref();
 
-            if buf[0] == b'>' {
+            if let Some(b'>') = buf.first() {
                 writer.write_all(&*buf)?;
                 continue;
             }
@@ -258,33 +258,29 @@ impl<T: std::io::Write> Writer<T> {
                 );
             }
 
-            let s = if let Some(n) = start.take() {
-                if (cnt + buf.len() as u64) < n {
-                    cnt += buf.len() as u64;
+            let s = match start.take() {
+                Some(n) if cnt + buf.len() < n => {
+                    cnt += buf.len();
                     *start = n.into();
                     continue;
                 }
-                *start = None;
-                (n - cnt) as usize
-            } else {
-                0
-            };
-            let e = if let Some(n) = end_inclusive {
-                if *n <= (cnt + buf.len() as u64) {
-                    (*n - cnt) as usize
-                } else {
-                    buf.len() - 1
+                Some(n) => {
+                    *start = None;
+                    (n - cnt) as usize
                 }
-            } else {
-                buf.len() - 1
+                None => 0,
+            };
+            let e = match end_inclusive {
+                Some(n) if *n <= cnt + buf.len() => *n - cnt,
+                _ => buf.len() - 1,
             };
 
             let mut bases = &buf[s..=e];
             let line_written = if s == 0 { written % *chars_per_line } else { 0 };
             let mut line_remain = *chars_per_line - line_written;
-            written += bases.len() as u64;
+            written += bases.len();
 
-            while line_remain <= (bases.len() as u64) {
+            while line_remain <= bases.len() {
                 writer.write_all(&bases[..line_remain as usize])?;
                 writer.write_all(b"\n")?;
                 bases = &bases[line_remain as usize..];
@@ -293,7 +289,7 @@ impl<T: std::io::Write> Writer<T> {
 
             writer.write_all(bases)?;
 
-            cnt += buf.len() as u64;
+            cnt += buf.len();
             if let Some(n) = end_inclusive {
                 if *n <= cnt {
                     writer.write_all(b"\n")?;
