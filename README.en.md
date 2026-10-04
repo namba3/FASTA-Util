@@ -58,6 +58,8 @@ Count the total length of the sequence
 
 Cut out a part of the sequence
 
+`--range` uses zero-based Rust range syntax. `2..10` selects positions 2 through 9, while `2..=10` includes position 10. `..10` selects from the beginning through position 9, and `2..` selects from position 2 to the end. The default `..` selects the entire sequence. `--chars-per-line` controls output wrapping and defaults to 60.
+
 When `-o`/`--output` specifies a file, the destination is replaced only after processing succeeds. The input file cannot also be used as the output file.
 
 For a slice from the middle of a large uncompressed FASTA, pass a matching `.fai` index with `--fai-index` to read the selected region directly. Create the index with `samtools faidx`. Rebuild it whenever the FASTA changes. This path validates the sequence symbols in the selected region.
