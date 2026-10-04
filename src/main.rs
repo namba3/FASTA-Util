@@ -123,6 +123,13 @@ fn with_line_context(line_number: usize, error: io::Error) -> io::Error {
     io::Error::new(error.kind(), format!("line {line_number}: {error}"))
 }
 
+fn sequence_length_overflow(line_number: usize) -> io::Error {
+    with_line_context(
+        line_number,
+        io::Error::new(io::ErrorKind::InvalidData, "sequence length overflow"),
+    )
+}
+
 fn count_sequence_bases<T, I>(iter: I) -> io::Result<u64>
 where
     T: AsRef<[u8]>,
@@ -153,7 +160,11 @@ fn count_sequence_line(line_number: usize, line: &[u8], count: &mut u64) -> io::
     let sequence =
         validated_sequence(line).map_err(|error| with_line_context(line_number, error))?;
     if !sequence.is_empty() {
-        *count += sequence.len() as u64;
+        let length =
+            u64::try_from(sequence.len()).map_err(|_| sequence_length_overflow(line_number))?;
+        *count = (*count)
+            .checked_add(length)
+            .ok_or_else(|| sequence_length_overflow(line_number))?;
     }
     Ok(())
 }
@@ -409,7 +420,10 @@ impl<T: std::io::Write> Writer<T> {
             return Ok(true);
         }
 
-        let line_end = self.count + buf.len();
+        let line_end = self
+            .count
+            .checked_add(buf.len())
+            .ok_or_else(|| sequence_length_overflow(line_number))?;
         let start_in_line = self.options.start.saturating_sub(self.count);
         let end_in_line = self
             .options
@@ -432,7 +446,10 @@ impl<T: std::io::Write> Writer<T> {
             0
         };
         let mut line_remain = chars_per_line - line_written;
-        self.written += bases.len();
+        let written_end = self
+            .written
+            .checked_add(bases.len())
+            .ok_or_else(|| sequence_length_overflow(line_number))?;
 
         while line_remain <= bases.len() {
             writer.write_all(&bases[..line_remain])?;
@@ -443,6 +460,7 @@ impl<T: std::io::Write> Writer<T> {
 
         writer.write_all(bases)?;
         self.count = line_end;
+        self.written = written_end;
         if self
             .options
             .end_exclusive
@@ -461,8 +479,8 @@ impl<T: std::io::Write> Writer<T> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Args, SequenceRange, Writer, WriterOptions, count_sequence_bases, parse_slice_range,
-        strip_line_ending, validated_sequence,
+        Args, SequenceRange, Writer, WriterOptions, count_sequence_bases, count_sequence_line,
+        parse_slice_range, strip_line_ending, validated_sequence,
     };
     use clap::Parser;
     use crossbeam::channel::unbounded;
@@ -629,6 +647,17 @@ mod tests {
     }
 
     #[test]
+    fn len_reports_sequence_count_overflow_with_line_context() {
+        let mut count = u64::MAX;
+
+        let error = count_sequence_line(8, b"A", &mut count).unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(error.to_string(), "line 8: sequence length overflow");
+        assert_eq!(count, u64::MAX);
+    }
+
+    #[test]
     fn validated_sequence_trims_whitespace_and_accepts_empty_lines() {
         assert_eq!(validated_sequence(b" \tACGT-\r\n").unwrap(), b"ACGT-");
         assert!(validated_sequence(b" \t\r\n").unwrap().is_empty());
@@ -777,6 +806,28 @@ mod tests {
 
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
         assert!(error.to_string().contains("invalid nucleic acid"));
+    }
+
+    #[test]
+    fn slice_reports_sequence_position_overflow_without_panicking() {
+        let mut writer = Writer::new(Vec::new(), options(10, None, None));
+        writer.count = usize::MAX;
+
+        let error = writer.process_line(4, b"A").unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(error.to_string(), "line 4: sequence length overflow");
+    }
+
+    #[test]
+    fn slice_reports_written_base_overflow_without_panicking() {
+        let mut writer = Writer::new(Vec::new(), options(10, None, None));
+        writer.written = usize::MAX;
+
+        let error = writer.process_line(5, b"A").unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(error.to_string(), "line 5: sequence length overflow");
     }
 
     #[test]
