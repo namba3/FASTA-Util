@@ -32,6 +32,12 @@ cargo build --release
 cargo run --manifest-path=generate_random_data/Cargo.toml -- 10000 > test.fna
 ```
 
+同じ乱数シードでデータを再生成するには、`--seed`を指定します。
+
+```sh
+cargo run --manifest-path=generate_random_data/Cargo.toml -- 10000 --seed 42 > test.fna
+```
+
 ## サブコマンド
 
 ### len

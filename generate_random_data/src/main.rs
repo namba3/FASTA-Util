@@ -1,5 +1,5 @@
 use fasta_util::nucleic_acid::NUCLEIC_ACID_SET;
-use rand::RngExt;
+use rand::{RngExt, SeedableRng, rngs::StdRng};
 use std::io::{self, BufWriter, Write};
 
 const DEFAULT_SIZE: usize = 10_000;
@@ -32,14 +32,50 @@ where
     Ok(size.max(1))
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let size = parse_size_args(std::env::args().skip(1))?;
+fn parse_generator_args<I>(args: I) -> Result<(usize, Option<u64>), io::Error>
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut size_args = Vec::new();
+    let mut seed = None;
+    let mut args = args.into_iter();
 
-    let mut rng = rand::rng();
+    while let Some(arg) = args.next() {
+        let seed_value = if arg == "--seed" {
+            Some(args.next().ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "missing value for --seed")
+            })?)
+        } else {
+            arg.strip_prefix("--seed=").map(str::to_owned)
+        };
+
+        if let Some(value) = seed_value {
+            if seed.is_some() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "--seed may only be specified once",
+                ));
+            }
+            seed = Some(value.parse::<u64>().map_err(|error| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("invalid seed '{value}': {error}"),
+                )
+            })?);
+        } else {
+            size_args.push(arg);
+        }
+    }
+
+    Ok((parse_size_args(size_args)?, seed))
+}
+
+fn write_fasta<W, R>(output: &mut W, rng: &mut R, size: usize) -> io::Result<()>
+where
+    W: Write,
+    R: RngExt,
+{
     let set = &NUCLEIC_ACID_SET[..16];
-
-    let stdout = io::stdout();
-    let mut output = BufWriter::new(stdout.lock());
     writeln!(output, ">TestData {size} random data")?;
 
     let mut remaining = size;
@@ -52,6 +88,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         output.write_all(&line[..line_len])?;
         output.write_all(b"\n")?;
         remaining -= line_len;
+    }
+
+    Ok(())
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let (size, seed) = parse_generator_args(std::env::args().skip(1))?;
+
+    let stdout = io::stdout();
+    let mut output = BufWriter::new(stdout.lock());
+
+    if let Some(seed) = seed {
+        let mut rng = StdRng::seed_from_u64(seed);
+        write_fasta(&mut output, &mut rng, size)?;
+    } else {
+        let mut rng = rand::rng();
+        write_fasta(&mut output, &mut rng, size)?;
     }
 
     output.flush()?;

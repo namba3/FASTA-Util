@@ -32,6 +32,12 @@ cargo build --release
 cargo run --manifest-path=generate_random_data/Cargo.toml -- 10000 > test.fna
 ```
 
+Pass `--seed` to reproduce generated data with the same random seed.
+
+```sh
+cargo run --manifest-path=generate_random_data/Cargo.toml -- 10000 --seed 42 > test.fna
+```
+
 ## Sub Commands
 
 ### len
