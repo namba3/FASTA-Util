@@ -114,6 +114,16 @@ fn len_counts_sequence_symbols_from_a_multi_record_file() {
     assert!(output.stderr.is_empty());
 }
 
+#[test]
+fn len_counts_lowercase_soft_masked_bases_from_a_file() {
+    let input = TemporaryFile::new(b">record\r\nacgtn\r\nu-\r\n");
+    let output = run_fasta_util(&["len", "--input", input.path()], b"");
+
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"7\n");
+    assert!(output.stderr.is_empty());
+}
+
 #[cfg(unix)]
 #[test]
 fn len_accepts_a_non_utf8_input_path() {

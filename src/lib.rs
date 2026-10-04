@@ -75,13 +75,7 @@ impl Iterator for LinesInFile {
     type Item = LineInFile;
     fn next(&mut self) -> Option<Self::Item> {
         let mmap = self.mmap.as_ref()?;
-        if mmap.len() <= self.head {
-            return None;
-        }
-
-        let line = mmap[self.head..]
-            .split_inclusive(|byte| *byte == b'\n')
-            .next()?;
+        let line = line_at(mmap, self.head)?;
         let start = self.head;
         self.head += line.len();
 
@@ -89,6 +83,28 @@ impl Iterator for LinesInFile {
             mmap: Arc::clone(mmap),
             range: start..self.head,
         })
+    }
+}
+impl LinesInFile {
+    /// Visits each line by borrowing the mapped bytes, without cloning the mapping.
+    ///
+    /// `line_number` is one-based. A line includes its trailing newline when present.
+    pub fn try_for_each_line<E>(
+        &self,
+        mut visitor: impl FnMut(usize, &[u8]) -> Result<(), E>,
+    ) -> Result<(), E> {
+        let Some(mmap) = &self.mmap else {
+            return Ok(());
+        };
+
+        let mut head = 0;
+        let mut line_number = 0;
+        while let Some(line) = line_at(mmap, head) {
+            line_number += 1;
+            visitor(line_number, line)?;
+            head += line.len();
+        }
+        Ok(())
     }
 }
 #[derive(Clone)]
@@ -107,6 +123,13 @@ fn lines(mmap: memmap2::Mmap) -> LinesInFile {
         mmap: Some(mmap),
         head: 0,
     }
+}
+
+fn line_at(mmap: &[u8], head: usize) -> Option<&[u8]> {
+    if head >= mmap.len() {
+        return None;
+    }
+    mmap[head..].split_inclusive(|byte| *byte == b'\n').next()
 }
 
 #[cfg(test)]
@@ -215,6 +238,66 @@ mod tests {
         assert_eq!(lines.next().unwrap().as_ref(), b"one line");
         assert!(lines.next().is_none());
         assert!(lines.next().is_none());
+    }
+
+    #[test]
+    fn borrowed_line_visitor_preserves_line_bytes_and_numbers() {
+        let input = TemporaryInput::new(b"first\r\n\nlast");
+        let lines = read_lines_from_file(input.open()).unwrap();
+        let mut visited = Vec::new();
+
+        lines
+            .try_for_each_line(|line_number, line| {
+                visited.push((line_number, line.to_vec()));
+                Ok::<_, std::io::Error>(())
+            })
+            .unwrap();
+
+        assert_eq!(
+            visited,
+            [
+                (1, b"first\r\n".to_vec()),
+                (2, b"\n".to_vec()),
+                (3, b"last".to_vec())
+            ]
+        );
+    }
+
+    #[test]
+    fn borrowed_line_visitor_stops_on_the_first_error() {
+        let input = TemporaryInput::new(b"first\nsecond\nthird");
+        let lines = read_lines_from_file(input.open()).unwrap();
+        let mut visited = Vec::new();
+
+        let error = lines
+            .try_for_each_line(|line_number, line| {
+                visited.push(line.to_vec());
+                if line_number == 2 {
+                    Err(std::io::Error::other("visitor stopped"))
+                } else {
+                    Ok(())
+                }
+            })
+            .unwrap_err();
+
+        assert_eq!(error.to_string(), "visitor stopped");
+        assert_eq!(visited, [b"first\n".to_vec(), b"second\n".to_vec()]);
+    }
+
+    #[test]
+    fn borrowed_line_visitor_does_not_call_back_for_an_empty_file() {
+        let input = TemporaryInput::new(b"");
+        let lines = read_lines_from_file(input.open()).unwrap();
+        let mut visited = false;
+
+        lines
+            .try_for_each_line(|_, _| {
+                visited = true;
+                Ok::<_, std::io::Error>(())
+            })
+            .unwrap();
+
+        assert!(!visited);
     }
 
     #[test]

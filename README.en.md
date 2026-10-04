@@ -102,8 +102,8 @@ Environment: Ubuntu 26.04.1 LTS (WSL2), AMD Ryzen 9 9900X, stable Rust 1.99.0, s
 
 | Command | Result | Time (mean ± standard deviation) |
 | --- | ---: | ---: |
-| `seqkit stats` | 3,298,430,636 bases, 705 records | 2,341 ± 196 ms |
-| `fasta-util len` | 3,298,430,636 bases | 2,987 ± 244 ms |
+| `seqkit stats` | 3,298,430,636 bases, 705 records | 1,618 ± 97 ms |
+| `fasta-util len` | 3,298,430,636 bases | 2,646 ± 284 ms |
 
 ### slice
 
@@ -111,12 +111,12 @@ Ranges are positions within chromosome 1. `seqret` uses one-based inclusive coor
 
 | Offset | Slice length | seqret (mean ± standard deviation) | fasta-util (mean ± standard deviation) |
 | ---: | ---: | ---: | ---: |
-| 100,000,000 | 100,000,000 | 963 ± 75 ms | 807 ± 118 ms |
-| 100,000,000 | 100,000 | 941 ± 99 ms | 397 ± 14 ms |
-| 100,000,000 | 100 | 649 ± 157 ms | 310 ± 58 ms |
-| 0 | 100,000,000 | 807 ± 63 ms | 260 ± 33 ms |
-| 0 | 100,000 | 603 ± 49 ms | 2.7 ± 0.6 ms |
-| 0 | 100 | 655 ± 53 ms | 2.0 ± 0.2 ms |
+| 100,000,000 | 100,000,000 | 843 ± 46 ms | 643 ± 68 ms |
+| 100,000,000 | 100,000 | 745 ± 39 ms | 294 ± 36 ms |
+| 100,000,000 | 100 | 731 ± 113 ms | 416 ± 124 ms |
+| 0 | 100,000,000 | 866 ± 43 ms | 344 ± 69 ms |
+| 0 | 100,000 | 769 ± 113 ms | 2.3 ± 0.3 ms |
+| 0 | 100 | 618 ± 137 ms | 1.6 ± 0.2 ms |
 
 To reproduce these measurements, install `seqkit`, `seqret`, `hyperfine`, and stable Rust, then run this script from the repository root. An alternate FASTA path can be supplied as the first argument.
 

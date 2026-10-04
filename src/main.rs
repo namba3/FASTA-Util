@@ -2,7 +2,7 @@ mod output;
 
 use clap::{Parser, Subcommand};
 use crossbeam::channel::{Receiver, bounded};
-use fasta_util::{is_nucleic_acid, read_lines_from_file, read_lines_from_stdin};
+use fasta_util::{LinesInFile, is_nucleic_acid, read_lines_from_file, read_lines_from_stdin};
 use output::TemporaryOutput;
 use std::{
     io::{self, BufWriter, Write},
@@ -94,7 +94,7 @@ fn len(args: LenArgs) -> Result<(), Box<dyn std::error::Error>> {
         Some(input) => {
             let input = std::fs::OpenOptions::new().read(true).open(input)?;
             let lines = read_lines_from_file(input)?;
-            count_sequence_bases(lines.map(Ok::<_, io::Error>))?
+            count_sequence_bases_from_file(&lines)?
         }
         None => count_sequence_bases(read_lines_from_stdin())?,
     };
@@ -125,21 +125,30 @@ where
     for (line_index, line) in iter.into_iter().enumerate() {
         let line_number = line_index + 1;
         let line = line.map_err(|error| with_line_context(line_number, error))?;
-        let line = line.as_ref();
-
-        if line.first() == Some(&b'>') {
-            continue;
-        }
-
-        let sequence =
-            validated_sequence(line).map_err(|error| with_line_context(line_number, error))?;
-        if sequence.is_empty() {
-            continue;
-        }
-
-        count += sequence.len() as u64;
+        count_sequence_line(line_number, line.as_ref(), &mut count)?;
     }
     Ok(count)
+}
+
+fn count_sequence_bases_from_file(lines: &LinesInFile) -> io::Result<u64> {
+    let mut count = 0u64;
+    lines.try_for_each_line(|line_number, line| {
+        count_sequence_line(line_number, line, &mut count)
+    })?;
+    Ok(count)
+}
+
+fn count_sequence_line(line_number: usize, line: &[u8], count: &mut u64) -> io::Result<()> {
+    if line.first() == Some(&b'>') {
+        return Ok(());
+    }
+
+    let sequence =
+        validated_sequence(line).map_err(|error| with_line_context(line_number, error))?;
+    if !sequence.is_empty() {
+        *count += sequence.len() as u64;
+    }
+    Ok(())
 }
 
 fn invalid_nucleic_acid(byte: u8) -> io::Error {
