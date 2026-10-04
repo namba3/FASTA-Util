@@ -30,3 +30,15 @@ fn header_and_sequence_length_match_requested_size() {
             .all(|base| b"ACGTNUKSYMWRBDHV".contains(&base))
     );
 }
+
+#[test]
+fn rejects_extra_positional_arguments() {
+    let output = Command::new(env!("CARGO_BIN_EXE_generate_random_data"))
+        .args(["123", "extra"])
+        .output()
+        .expect("failed to run random-data generator");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!output.status.success());
+    assert!(stderr.contains("unexpected argument 'extra'"));
+}
