@@ -16,7 +16,7 @@ UKS-
 MRY
 ```
 
-`len` counts sequence symbols, excluding headers and blank lines. `slice` positions also count only sequence symbols, excluding headers and line breaks. This tool accepts the uppercase symbols `ACGTNUKSYMWRBDHV` and `-` for a gap. Lowercase and other symbols are rejected.
+`len` counts sequence symbols, excluding headers and blank lines. `slice` positions also count only sequence symbols, excluding headers and line breaks. For multiple records, the range indexes the sequences concatenated in file order. Headers encountered before the range ends are preserved, so the output may include a header for a record that contributes no symbols to the selected range. This tool accepts the uppercase symbols `ACGTNUKSYMWRBDHV` and `-` for a gap. Lowercase and other symbols are rejected.
 
 ## Build
 
