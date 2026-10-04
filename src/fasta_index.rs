@@ -252,6 +252,7 @@ fn write_sequence_range<W: Write>(
     writer: &mut W,
 ) -> io::Result<()> {
     let mut position = start;
+    let mut raw = Vec::with_capacity(COPY_BUFFER_SIZE);
     while position < end {
         let column = position % record.line_bases;
         let lines_per_chunk = (COPY_BUFFER_SIZE / record.line_width).max(1);
@@ -294,32 +295,33 @@ fn write_sequence_range<W: Write>(
             .ok_or_else(|| {
                 io::Error::new(io::ErrorKind::InvalidData, "FAI sequence offset overflow")
             })?;
-        let mut raw = vec![
-            0;
-            usize::try_from(raw_count).map_err(|_| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "FAI sequence range is too large",
-                )
-            })?
-        ];
+        let raw_count = usize::try_from(raw_count).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "FAI sequence range is too large",
+            )
+        })?;
+        raw.resize(raw_count, 0);
         file.seek(SeekFrom::Start(byte_offset))?;
         file.read_exact(&mut raw)?;
-        let mut bases = Vec::with_capacity(count);
+        // Compact wrapped sequence lines in place and reuse this buffer next iteration.
         let mut raw_position = 0usize;
+        let mut compacted_position = 0usize;
         let mut remaining = count;
         let mut line_column = column;
         while remaining > 0 {
             let line_bases = (record.line_bases - line_column).min(remaining);
-            bases.extend_from_slice(&raw[raw_position..raw_position + line_bases]);
+            raw.copy_within(raw_position..raw_position + line_bases, compacted_position);
             raw_position += line_bases;
+            compacted_position += line_bases;
             remaining -= line_bases;
             if remaining > 0 {
                 raw_position += record.line_width - record.line_bases;
                 line_column = 0;
             }
         }
-        let bases = validated_sequence(&bases)?;
+        raw.truncate(count);
+        let bases = validated_sequence(&raw)?;
         if bases.len() != count {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
