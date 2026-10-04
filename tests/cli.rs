@@ -363,6 +363,44 @@ fn indexed_slice_rejects_index_as_output_without_changing_it() {
     assert_eq!(index.read(), original_index);
 }
 
+#[cfg(unix)]
+#[test]
+fn indexed_slice_rejects_linked_index_outputs_without_changing_the_index() {
+    let (input, index) = indexed_fasta_fixture();
+    let original_index = index.read();
+
+    for link_kind in ["hard link", "symbolic link"] {
+        let output_alias = TemporaryFile::new(b"temporary alias path");
+        fs::remove_file(&output_alias.0).unwrap();
+        match link_kind {
+            "hard link" => fs::hard_link(&index.0, &output_alias.0).unwrap(),
+            "symbolic link" => std::os::unix::fs::symlink(&index.0, &output_alias.0).unwrap(),
+            _ => unreachable!(),
+        }
+
+        let output = run_fasta_util(
+            &[
+                "slice",
+                "--input",
+                input.path(),
+                "--fai-index",
+                index.path(),
+                "--output",
+                output_alias.path(),
+            ],
+            b"",
+        );
+
+        assert!(
+            !output.status.success(),
+            "accepted {link_kind} as the output path"
+        );
+        assert!(String::from_utf8_lossy(&output.stderr).contains("same file"));
+        assert_eq!(index.read(), original_index, "via {link_kind}");
+        assert_eq!(output_alias.read(), original_index, "via {link_kind}");
+    }
+}
+
 #[test]
 fn indexed_slice_rejects_malformed_and_out_of_bounds_indexes() {
     let (input, _) = indexed_fasta_fixture();
