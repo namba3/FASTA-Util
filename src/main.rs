@@ -320,8 +320,8 @@ fn slice(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
         None => {
             let (tx, rx) = bounded(LINE_CHANNEL_CAPACITY);
             let hndl = std::thread::spawn(move || -> Result<(), std::io::Error> {
-                let mut lines = read_lines_from_stdin();
-                while let Some(line) = lines.next() {
+                let lines = read_lines_from_stdin();
+                for line in lines {
                     if tx.send(line).is_err() {
                         break;
                     }
@@ -331,12 +331,9 @@ fn slice(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
             });
 
             let write_result = writer.run(rx);
-            let read_result = hndl.join().unwrap_or_else(|_| {
-                Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "input reader thread panicked",
-                ))
-            });
+            let read_result = hndl
+                .join()
+                .unwrap_or_else(|_| Err(io::Error::other("input reader thread panicked")));
             write_result?;
             read_result?;
             Ok(())
@@ -399,7 +396,7 @@ impl<T: std::io::Write> Writer<T> {
         let chars_per_line = self.options.chars_per_line;
 
         if let Some(b'>') = buf.first() {
-            if self.written > 0 && self.written % chars_per_line != 0 {
+            if self.written > 0 && !self.written.is_multiple_of(chars_per_line) {
                 writer.write_all(b"\n")?;
             }
             writer.write_all(buf)?;
@@ -451,7 +448,7 @@ impl<T: std::io::Write> Writer<T> {
             .end_exclusive
             .is_some_and(|end| end <= self.count)
         {
-            if self.written > 0 && self.written % chars_per_line != 0 {
+            if self.written > 0 && !self.written.is_multiple_of(chars_per_line) {
                 writer.write_all(b"\n")?;
             }
             return Ok(false);

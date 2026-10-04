@@ -3,13 +3,41 @@ pub const UPPERCASE_NUCLEIC_ACID_SET: &[u8; 16] = b"ACGTNUKSYMWRBDHV";
 
 #[inline]
 pub const fn is_nucleic_acid_match(x: u8) -> bool {
-    match x {
-        b'A' | b'C' | b'G' | b'T' | b'N' | b'U' => true,
-        b'K' | b'S' | b'Y' | b'M' | b'W' | b'R' | b'B' | b'D' | b'H' | b'V' | b'-' => true,
-        b'a' | b'c' | b'g' | b't' | b'n' | b'u' => true,
-        b'k' | b's' | b'y' | b'm' | b'w' | b'r' | b'b' | b'd' | b'h' | b'v' => true,
-        _ => false,
-    }
+    matches!(
+        x,
+        b'A' | b'C'
+            | b'G'
+            | b'T'
+            | b'N'
+            | b'U'
+            | b'K'
+            | b'S'
+            | b'Y'
+            | b'M'
+            | b'W'
+            | b'R'
+            | b'B'
+            | b'D'
+            | b'H'
+            | b'V'
+            | b'-'
+            | b'a'
+            | b'c'
+            | b'g'
+            | b't'
+            | b'n'
+            | b'u'
+            | b'k'
+            | b's'
+            | b'y'
+            | b'm'
+            | b'w'
+            | b'r'
+            | b'b'
+            | b'd'
+            | b'h'
+            | b'v'
+    )
 }
 
 #[inline]

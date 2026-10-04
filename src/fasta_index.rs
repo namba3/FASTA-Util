@@ -35,7 +35,7 @@ pub(super) fn write_slice<W: Write>(
     for record in &records {
         let record_end = record_start + record.length;
         let header = read_header(&mut input, record.sequence_offset, &record.name)?;
-        if written > 0 && written % chars_per_line != 0 {
+        if written > 0 && !written.is_multiple_of(chars_per_line) {
             writer.write_all(b"\n")?;
         }
         writer.write_all(strip_line_ending(&header))?;
@@ -63,7 +63,7 @@ pub(super) fn write_slice<W: Write>(
 
     if end_exclusive.is_some_and(|end| end <= total_length)
         && written > 0
-        && written % chars_per_line != 0
+        && !written.is_multiple_of(chars_per_line)
     {
         writer.write_all(b"\n")?;
     }
@@ -272,8 +272,7 @@ fn write_sequence_range<W: Write>(
         let column = position % record.line_bases;
         let lines_per_chunk = (COPY_BUFFER_SIZE / record.line_width).max(1);
         let bases_per_chunk = lines_per_chunk
-            .checked_mul(record.line_bases)
-            .unwrap_or(usize::MAX)
+            .saturating_mul(record.line_bases)
             .saturating_sub(column)
             .min(COPY_BUFFER_SIZE);
         let count = (end - position).min(bases_per_chunk);
@@ -361,7 +360,7 @@ fn write_wrapped_bases<W: Write>(
         writer.write_all(&bases[..count])?;
         *written += count;
         bases = &bases[count..];
-        if *written % chars_per_line == 0 {
+        if (*written).is_multiple_of(chars_per_line) {
             writer.write_all(b"\n")?;
         }
     }
