@@ -1,8 +1,15 @@
 use fasta_util::nucleic_acid::NUCLEIC_ACID_SET;
-use rand::{RngExt, SeedableRng, rngs::StdRng};
+use rand::{rngs::StdRng, RngExt, SeedableRng};
 use std::io::{self, BufWriter, Write};
 
 const DEFAULT_SIZE: usize = 10_000;
+const USAGE: &str = "Usage: generate_random_data [SIZE] [--seed SEED]\n\
+Generate a FASTA file containing a random nucleotide sequence.\n\
+\n\
+Arguments:\n\
+  SIZE       Sequence length in bases (default: 10000; minimum: 1)\n\
+  --seed     Use a reproducible random seed\n\
+  -h, --help Print this help message";
 
 fn parse_size_args<I>(args: I) -> Result<usize, io::Error>
 where
@@ -94,7 +101,12 @@ where
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let (size, seed) = parse_generator_args(std::env::args().skip(1))?;
+    let args = std::env::args().skip(1).collect::<Vec<_>>();
+    if args.iter().any(|arg| arg == "-h" || arg == "--help") {
+        println!("{USAGE}");
+        return Ok(());
+    }
+    let (size, seed) = parse_generator_args(args)?;
 
     let stdout = io::stdout();
     let mut output = BufWriter::new(stdout.lock());
@@ -113,7 +125,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{DEFAULT_SIZE, parse_size_args};
+    use super::{parse_size_args, DEFAULT_SIZE};
 
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_owned()).collect()
