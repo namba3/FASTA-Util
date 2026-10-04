@@ -243,6 +243,14 @@ fn slice(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
         end_exclusive: range.end_exclusive,
     };
 
+    let file_lines = match args.input {
+        Some(input) => {
+            let input = std::fs::OpenOptions::new().read(true).open(input)?;
+            Some(read_lines_from_file(input)?)
+        }
+        None => None,
+    };
+
     let output: Box<dyn std::io::Write> = if let Some(path) = args.output {
         Box::new(
             std::fs::OpenOptions::new()
@@ -257,12 +265,10 @@ fn slice(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     let mut writer = Writer::new(output, writer_options);
 
-    let (hndl, write_result) = match args.input {
-        Some(input) => {
-            let input = std::fs::OpenOptions::new().read(true).open(input)?;
+    let (hndl, write_result) = match file_lines {
+        Some(mut lines) => {
             let (tx, rx) = bounded(LINE_CHANNEL_CAPACITY);
             let hndl = std::thread::spawn(move || -> Result<(), std::io::Error> {
-                let mut lines = read_lines_from_file(input)?;
                 while let Some(line) = lines.next() {
                     if tx.send(Ok(line)).is_err() {
                         break;
