@@ -88,77 +88,39 @@ cargo bench --bench nucleic_acid
 cargo bench --bench nucleic_acid -- --input-size 100000 --sample-ms 500
 ```
 
-OS: Ubuntu (WSL2)
+## 実データのベンチマーク
 
-CPU: AMD Ryzen 9 5900X
+2026-10-04 に `dataset/ncbi_dataset` 内の RefSeq GRCh38.p14 FASTA を使って測定しました。全ゲノムの長さ計測には705レコードを含む `GCF_000001405.40_GRCh38.p14_genomic.fna`（3,339,739,109 bytes）を使い、slice にはその中の chr1（`NC_000001.11`、248,956,422塩基）を使いました。
 
-テストデータ: [Homo sapiens](https://www.ncbi.nlm.nih.gov/data-hub/taxonomy/9606/)
+元データには小文字のソフトマスク配列が含まれます。本ツールは大文字のみを受け付けるため、比較前に `seqkit seq --upper-case` で一時コピーを作成しました。塩基数とレコード構成は維持されます。slice の各ケースでは、計測前に `seqret` と本ツールの出力がバイト単位で一致することを確認しています。
+
+測定環境は Ubuntu 26.04.1 LTS（WSL2）、AMD Ryzen 9 9900X、stable Rust 1.99.0、seqkit 2.10.1、EMBOSS seqret 6.6.0.0、hyperfine 1.20.0 です。各コマンドを1回ウォームアップした後、5回測定した平均と標準偏差を示します。結果は実行環境やファイルキャッシュの状態で変わります。
 
 ### len
 
-`seqkit stats` コマンドと比較します。
+`seqkit stats` は705レコードの統計を計算し、本ツールは配列記号の総数を計算します。両方の合計値は一致しました。
 
-seqkit:
-
-```sh
-seqkit stats ncbi_dataset/data/GCF_000001405.39/chr1.fna
-```
-
-```txt
-file                                         format  type  num_seqs      sum_len      min_len      avg_len      max_len
-ncbi_dataset/data/GCF_000001405.39/chr1.fna  FASTA   DNA          1  248,956,422  248,956,422  248,956,422  248,956,422
-```
-
-fasta-util:
-
-```txt
-./target/release/fasta-util len -i ncbi_dataset/data/GCF_000001405.39/chr1.fna
-```
-
-```txt
-248956422
-```
-
-| コマンド | 時間 (ms) |
-| --- | ---: |
-| `seqkit stats ncbi_dataset/data/GCF_000001405.39/chr1.fna` | 301.8 |
-| `./target/release/fasta-util len -i ncbi_dataset/data/GCF_000001405.39/chr1.fna` | 248.2 |
+| コマンド | 結果 | 時間（平均 ± 標準偏差） |
+| --- | ---: | ---: |
+| `seqkit stats` | 3,298,430,636塩基、705レコード | 2,641 ± 428 ms |
+| `fasta-util len` | 3,298,430,636塩基 | 2,821 ± 184 ms |
 
 ### slice
 
-`seqret` コマンドと比較します。
+切り出し範囲は chr1 内の位置です。`seqret` は1始まりの両端包含、本ツールは0始まりの両端包含で指定し、出力は60塩基ごとに折り返しました。
 
-seqret:
+| オフセット | 切り出し長 | seqret（平均 ± 標準偏差） | fasta-util（平均 ± 標準偏差） |
+| ---: | ---: | ---: | ---: |
+| 100,000,000 | 100,000,000 | 1,182 ± 172 ms | 988 ± 190 ms |
+| 100,000,000 | 100,000 | 832 ± 69 ms | 405 ± 28 ms |
+| 100,000,000 | 100 | 799 ± 34 ms | 300 ± 59 ms |
+| 0 | 100,000,000 | 975 ± 104 ms | 547 ± 151 ms |
+| 0 | 100,000 | 953 ± 199 ms | 3.4 ± 0.8 ms |
+| 0 | 100 | 853 ± 98 ms | 2.3 ± 0.3 ms |
+
+同じ条件で再測定するには、`seqkit`、`seqret`、`hyperfine` と stable Rust を用意し、リポジトリのルートで次を実行します。データセットのパスは引数でも指定できます。
 
 ```sh
-seqret -sequence ncbi_dataset/data/GCF_000001405.39/chr1.fna -sbegin 100000000 -send 200000000 -auto -stdout | sha256sum
+./scripts/benchmark_real_data.sh
+./scripts/benchmark_real_data.sh path/to/genomic.fna
 ```
-
-```txt
-c570cb67eb05a25922a3fc6f299cdc8bb5763ae3375281505bf15ff0537286cf  -
-```
-
-fasta-util:
-
-```sh
-./target/release/fasta-util slice -i ncbi_dataset/data/GCF_000001405.39/chr1.fna --chars-per-line=60 --range 99999999..=199999999 | sha256sum
-```
-
-```txt
-c570cb67eb05a25922a3fc6f299cdc8bb5763ae3375281505bf15ff0537286cf  -
-```
-
-| 対象 | オフセット | 切り出し長 | コマンド | 時間 (ms) |
-| --- | ---: | ---: | --- | ---: |
-| seqret | 100,000,000 | 100,000,000 | `seqret -sequence ncbi_dataset/data/GCF_000001405.39/chr1.fna -auto -stdout -sbegin 100000000 -send 200000000` | 665.7 |
-| seqret | 100,000,000 | 100,000 | `seqret -sequence ncbi_dataset/data/GCF_000001405.39/chr1.fna -auto -stdout -sbegin 100000000 -send 100100000` | 563.0 |
-| seqret | 100,000,000 | 100 | `seqret -sequence ncbi_dataset/data/GCF_000001405.39/chr1.fna -auto -stdout -sbegin 100000000 -send 100000100` | 552.7 |
-| seqret | 0 | 100,000,000 | `seqret -sequence ncbi_dataset/data/GCF_000001405.39/chr1.fna -auto -stdout -send 100000000` | 677.1 |
-| seqret | 0 | 100,000 | `seqret -sequence ncbi_dataset/data/GCF_000001405.39/chr1.fna -auto -stdout -send 100000` | 565.2 |
-| seqret | 0 | 100 | `seqret -sequence ncbi_dataset/data/GCF_000001405.39/chr1.fna -auto -stdout -send 100` | 558.3 |
-| fasta-util | 100,000,000 | 100,000,000 | `./target/release/fasta-util slice -i ncbi_dataset/data/GCF_000001405.39/chr1.fna --chars-per-line=60 --range 99999999..=199999999` | 251.9 |
-| fasta-util | 100,000,000 | 100,000 | `./target/release/fasta-util slice -i ncbi_dataset/data/GCF_000001405.39/chr1.fna --chars-per-line=60 --range 99999999..=100099999` | 127.6 |
-| fasta-util | 100,000,000 | 100 | `./target/release/fasta-util slice -i ncbi_dataset/data/GCF_000001405.39/chr1.fna --chars-per-line=60 --range 99999999..=100000099` | 101.7 |
-| fasta-util | 0 | 100,000,000 | `./target/release/fasta-util slice -i ncbi_dataset/data/GCF_000001405.39/chr1.fna --chars-per-line=60 --range ..=99999999` | 217.1 |
-| fasta-util | 0 | 100,000 | `./target/release/fasta-util slice -i ncbi_dataset/data/GCF_000001405.39/chr1.fna --chars-per-line=60 --range ..=99999` | 0.9 |
-| fasta-util | 0 | 100 | `./target/release/fasta-util slice -i ncbi_dataset/data/GCF_000001405.39/chr1.fna --chars-per-line=60 --range ..=99` | 0.7 |

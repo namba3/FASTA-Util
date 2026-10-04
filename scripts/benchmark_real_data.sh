@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+dataset="${1:-$repo_root/dataset/ncbi_dataset/data/GCF_000001405.40/GCF_000001405.40_GRCh38.p14_genomic.fna}"
+binary="$repo_root/target/release/fasta-util"
+rustup_bin="$(command -v rustup || true)"
+seqkit="$(command -v seqkit || true)"
+seqret="$(command -v seqret || true)"
+hyperfine="$(command -v hyperfine || true)"
+
+for tool in "$rustup_bin" "$seqkit" "$seqret" "$hyperfine"; do
+    if [[ -z "$tool" || ! -x "$tool" ]]; then
+        printf 'Required command not found: %s\n' "${tool:-seqkit/seqret/hyperfine}" >&2
+        exit 1
+    fi
+done
+if [[ ! -f "$dataset" ]]; then
+    printf 'FASTA dataset not found: %s\n' "$dataset" >&2
+    exit 1
+fi
+
+"$rustup_bin" run stable cargo build --release --manifest-path "$repo_root/Cargo.toml" --bin fasta-util
+
+work_dir="$(mktemp -d)"
+trap 'rm -rf "$work_dir"' EXIT
+normalized="$work_dir/genome_upper.fna"
+chr1="$work_dir/chr1.fna"
+# fasta-util accepts uppercase nucleic acid symbols; preserve sequence data and normalize case.
+"$seqkit" seq --upper-case "$dataset" > "$normalized"
+"$seqkit" grep -p NC_000001.11 "$normalized" > "$chr1"
+
+printf '%s\n' 'Tool versions:'
+"$seqkit" version
+"$seqret" -version
+"$rustup_bin" run stable rustc --version
+printf '\n%s\n' 'Dataset statistics:'
+printf 'Source: %s\n' "$dataset"
+printf 'Benchmark input: source FASTA uppercased with seqkit --upper-case\n'
+stat -c '%n: %s bytes' "$normalized" "$chr1"
+"$seqkit" stats "$normalized" "$chr1"
+printf 'fasta-util len (assembly): '
+"$binary" len -i "$normalized"
+printf 'fasta-util len (chr1): '
+"$binary" len -i "$chr1"
+
+q() {
+    printf '%q' "$1"
+}
+
+q_dataset="$(q "$normalized")"
+q_chr1="$(q "$chr1")"
+q_binary="$(q "$binary")"
+q_seqkit="$(q "$seqkit")"
+q_seqret="$(q "$seqret")"
+
+printf '\n%s\n' 'Full assembly length benchmark (1 warmup, 5 measured runs):'
+"$hyperfine" --shell=none --warmup 1 --runs 5 --style basic \
+    -n 'seqkit stats' "$q_seqkit stats $q_dataset" \
+    -n 'fasta-util len' "$q_binary len -i $q_dataset"
+
+printf '\n%s\n' 'chr1 slice benchmarks (1 warmup, 5 measured runs):'
+while read -r name start length; do
+    end=$((start + length - 1))
+    seqret_start=$((start + 1))
+    seqret_end=$((start + length))
+    seqret_command="$q_seqret -sequence $q_chr1 -sbegin $seqret_start -send $seqret_end -auto -stdout"
+    fasta_command="$q_binary slice -i $q_chr1 --chars-per-line=60 --range ${start}..=${end}"
+
+    "$seqret" -sequence "$chr1" -sbegin "$seqret_start" -send "$seqret_end" -auto -stdout > "$work_dir/seqret.out"
+    "$binary" slice -i "$chr1" --chars-per-line=60 --range "${start}..=${end}" > "$work_dir/fasta-util.out"
+    if ! cmp -s "$work_dir/seqret.out" "$work_dir/fasta-util.out"; then
+        printf 'Output mismatch for slice case %s\n' "$name" >&2
+        exit 1
+    fi
+
+    printf '\n%s\n' "$name: offset=$start length=$length"
+    "$hyperfine" --shell=none --warmup 1 --runs 5 --style basic \
+        -n seqret "$seqret_command" \
+        -n fasta-util "$fasta_command"
+done <<'CASES'
+middle_100M 100000000 100000000
+middle_100K 100000000 100000
+middle_100 100000000 100
+start_100M 0 100000000
+start_100K 0 100000
+start_100 0 100
+CASES
