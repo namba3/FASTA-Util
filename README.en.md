@@ -8,6 +8,8 @@ A CLI tool for playing with FASTA files
 
 FASTA is a text format for nucleotide or amino acid sequences. Each record starts with a header line beginning with `>`, followed by one or more sequence lines. Sequence data can wrap across multiple lines.
 
+This tool currently processes nucleotide FASTA files. Amino acid sequences are not supported.
+
 ```fasta
 >record-1 optional description
 ACGTN
