@@ -1,7 +1,9 @@
 [package]
 name = "generate_random_data"
 version = "0.1.0"
+description = "Generate random nucleotide FASTA fixtures"
 edition = "2024"
+rust-version = "1.88"
 
 [dependencies]
 fasta-util = { path = "../" }

@@ -1,7 +1,9 @@
 [package]
 name = "fasta-util"
 version = "0.1.0"
+description = "A streaming FASTA CLI for sequence length and slicing"
 edition = "2024"
+rust-version = "1.88"
 
 [profile.release]
 opt-level = 3

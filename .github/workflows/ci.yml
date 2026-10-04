@@ -13,6 +13,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install minimum supported Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v2
+        with:
+          toolchain: 1.88.0
+
+      - name: Check main crate
+        run: cargo check --locked
+
+      - name: Check random-data generator
+        run: cargo check --manifest-path generate_random_data/Cargo.toml --locked
+
   check:
     strategy:
       matrix:
