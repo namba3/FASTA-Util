@@ -2,7 +2,7 @@ use std::time::Duration;
 
 pub const DEFAULT_INPUT_SIZE: usize = 10_000;
 pub const DEFAULT_SAMPLE_MS: u64 = 200;
-pub const INVALID_BASES: &[u8] = b"xyz0123?";
+pub const INVALID_BASES: &[u8] = b"XZ0123?";
 
 pub struct Config {
     pub input_size: usize,

@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use crossbeam::channel::{bounded, Receiver};
+use crossbeam::channel::{Receiver, bounded};
 use fasta_util::{is_nucleic_acid, read_lines_from_file, read_lines_from_stdin};
 use std::{
     fs::{self, File, OpenOptions, Permissions},
@@ -218,8 +218,8 @@ where
             continue;
         }
 
-        let sequence = validated_sequence(line)
-            .map_err(|error| with_line_context(line_number, error))?;
+        let sequence =
+            validated_sequence(line).map_err(|error| with_line_context(line_number, error))?;
         if sequence.is_empty() {
             continue;
         }
@@ -450,8 +450,8 @@ impl<T: std::io::Write> Writer<T> {
                 continue;
             }
 
-            let buf = validated_sequence(buf)
-                .map_err(|error| with_line_context(line_number, error))?;
+            let buf =
+                validated_sequence(buf).map_err(|error| with_line_context(line_number, error))?;
             if buf.len() == 0 {
                 continue;
             }
@@ -678,6 +678,22 @@ mod tests {
     }
 
     #[test]
+    fn validated_sequence_accepts_and_preserves_lowercase_symbols() {
+        assert_eq!(
+            validated_sequence(b"acgtnuk-symwrbdhv").unwrap(),
+            b"acgtnuk-symwrbdhv"
+        );
+    }
+
+    #[test]
+    fn len_counts_lowercase_soft_masked_symbols() {
+        assert_eq!(
+            count_sequence_bases([Ok::<_, std::io::Error>(b"aCgTn".as_slice())]).unwrap(),
+            5
+        );
+    }
+
+    #[test]
     fn validated_sequence_reports_invalid_symbols_after_trimming() {
         let error = validated_sequence(b" \tACX\r\n").unwrap_err();
 
@@ -709,6 +725,13 @@ mod tests {
         let output = write_fasta(&[b">record\n", b"ACGT\n", b"NU\n"], options(3, None, None));
 
         assert_eq!(output, b">record\nACG\nTNU\n");
+    }
+
+    #[test]
+    fn slice_preserves_lowercase_soft_masking() {
+        let output = write_fasta(&[b">record\n", b"aCgTn\n"], options(10, None, None));
+
+        assert_eq!(output, b">record\naCgTn");
     }
 
     #[test]

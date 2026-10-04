@@ -1,5 +1,5 @@
-use fasta_util::nucleic_acid::NUCLEIC_ACID_SET;
-use rand::{rngs::StdRng, RngExt, SeedableRng};
+use fasta_util::nucleic_acid::UPPERCASE_NUCLEIC_ACID_SET;
+use rand::{RngExt, SeedableRng, rngs::StdRng};
 use std::io::{self, BufWriter, Write};
 
 const DEFAULT_SIZE: usize = 10_000;
@@ -116,7 +116,7 @@ where
     W: Write,
     R: RngExt,
 {
-    let set = &NUCLEIC_ACID_SET[..16];
+    let set = UPPERCASE_NUCLEIC_ACID_SET;
     writeln!(output, ">TestData {size} random data")?;
 
     let mut remaining = size;
@@ -172,7 +172,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_size_args, DEFAULT_SIZE};
+    use super::{DEFAULT_SIZE, parse_size_args};
 
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_owned()).collect()

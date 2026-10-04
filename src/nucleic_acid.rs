@@ -49,13 +49,16 @@ impl Into<u8> for NucleicAcid {
     }
 }
 
-pub const NUCLEIC_ACID_SET: &[u8; 17] = b"ACGTNUKSYMWRBDHV-";
+pub const NUCLEIC_ACID_SET: &[u8; 33] = b"ACGTNUKSYMWRBDHV-acgtnuksymwrbdhv";
+pub const UPPERCASE_NUCLEIC_ACID_SET: &[u8; 16] = b"ACGTNUKSYMWRBDHV";
 
 #[inline]
 pub const fn is_nucleic_acid_match(x: u8) -> bool {
     match x {
         b'A' | b'C' | b'G' | b'T' | b'N' | b'U' => true,
         b'K' | b'S' | b'Y' | b'M' | b'W' | b'R' | b'B' | b'D' | b'H' | b'V' | b'-' => true,
+        b'a' | b'c' | b'g' | b't' | b'n' | b'u' => true,
+        b'k' | b's' | b'y' | b'm' | b'w' | b'r' | b'b' | b'd' | b'h' | b'v' => true,
         _ => false,
     }
 }
@@ -87,6 +90,22 @@ pub const fn is_nucleic_acid_lut(x: u8) -> bool {
         v[b'H' as usize] = true;
         v[b'V' as usize] = true;
         v[b'-' as usize] = true;
+        v[b'a' as usize] = true;
+        v[b'c' as usize] = true;
+        v[b'g' as usize] = true;
+        v[b't' as usize] = true;
+        v[b'n' as usize] = true;
+        v[b'u' as usize] = true;
+        v[b'k' as usize] = true;
+        v[b's' as usize] = true;
+        v[b'y' as usize] = true;
+        v[b'm' as usize] = true;
+        v[b'w' as usize] = true;
+        v[b'r' as usize] = true;
+        v[b'b' as usize] = true;
+        v[b'd' as usize] = true;
+        v[b'h' as usize] = true;
+        v[b'v' as usize] = true;
 
         v
     };

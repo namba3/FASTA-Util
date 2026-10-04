@@ -47,30 +47,46 @@ pub fn read_lines_from_stdin() -> impl Iterator<Item = std::io::Result<Vec<u8>>>
     })
 }
 
+/// Reads file lines through a memory map without copying the file contents.
+///
+/// The file must not be modified or truncated while the returned iterator or any
+/// `LineInFile` yielded by it is alive. Each yielded line keeps the mapping alive,
+/// even after the iterator is dropped.
 pub fn read_lines_from_file(file: File) -> Result<LinesInFile, std::io::Error> {
+    if file.metadata()?.len() == 0 {
+        return Ok(LinesInFile {
+            mmap: None,
+            head: 0,
+        });
+    }
+
+    // SAFETY: The returned iterator and each yielded line retain the mapping. The
+    // caller must keep the backing file unchanged for those values' lifetimes,
+    // as documented above.
     let mmap = unsafe { memmap2::Mmap::map(&file) }?;
     Ok(lines(mmap))
 }
 
 pub struct LinesInFile {
-    mmap: Arc<memmap2::Mmap>,
+    mmap: Option<Arc<memmap2::Mmap>>,
     head: usize,
 }
 impl Iterator for LinesInFile {
     type Item = LineInFile;
     fn next(&mut self) -> Option<Self::Item> {
-        if self.mmap.len() <= self.head {
+        let mmap = self.mmap.as_ref()?;
+        if mmap.len() <= self.head {
             return None;
         }
 
-        let line = self.mmap[self.head..]
+        let line = mmap[self.head..]
             .split_inclusive(|byte| *byte == b'\n')
             .next()?;
         let start = self.head;
         self.head += line.len();
 
         Some(LineInFile {
-            mmap: Arc::clone(&self.mmap),
+            mmap: Arc::clone(mmap),
             range: start..self.head,
         })
     }
@@ -88,7 +104,7 @@ impl AsRef<[u8]> for LineInFile {
 fn lines(mmap: memmap2::Mmap) -> LinesInFile {
     let mmap = Arc::new(mmap);
     LinesInFile {
-        mmap: mmap,
+        mmap: Some(mmap),
         head: 0,
     }
 }

@@ -18,7 +18,7 @@ UKS-
 MRY
 ```
 
-`len` counts sequence symbols, excluding headers and blank lines. `slice` positions also count only sequence symbols, excluding headers and line breaks. For multiple records, the range indexes the sequences concatenated in file order. Headers encountered before the range ends are preserved, so the output may include a header for a record that contributes no symbols to the selected range. This tool accepts the uppercase symbols `ACGTNUKSYMWRBDHV` and `-` for a gap. Lowercase and other symbols are rejected.
+`len` counts sequence symbols, excluding headers and blank lines. `slice` positions also count only sequence symbols, excluding headers and line breaks. For multiple records, the range indexes the sequences concatenated in file order. Headers encountered before the range ends are preserved, so the output may include a header for a record that contributes no symbols to the selected range. This tool accepts uppercase and lowercase `ACGTNUKSYMWRBDHV` symbols and `-` for a gap. `slice` preserves the original letter case. Other symbols are rejected.
 
 ## Build
 
@@ -92,7 +92,7 @@ cargo bench --bench nucleic_acid -- --input-size 100000 --sample-ms 500
 
 Measurements were taken on 2026-10-04 using the RefSeq GRCh38.p14 FASTA in `dataset/ncbi_dataset`. The full-genome length comparison used `GCF_000001405.40_GRCh38.p14_genomic.fna` (3,339,739,109 bytes), containing 705 records. Slice comparisons used its chromosome 1 record (`NC_000001.11`, 248,956,422 bases).
 
-The source FASTA contains lowercase soft-masked sequence. Since this tool accepts uppercase symbols only, a temporary copy was created with `seqkit seq --upper-case` before comparison. Base counts and record structure were preserved. Before timing each slice case, the `seqret` and `fasta-util` outputs were verified byte-for-byte.
+The source FASTA contains lowercase soft-masked sequence. At the time of this measurement, the tool accepted uppercase symbols only, so a temporary copy was created with `seqkit seq --upper-case` before comparison. Base counts and record structure were preserved. Before timing each slice case, the `seqret` and `fasta-util` outputs were verified byte-for-byte.
 
 Environment: Ubuntu 26.04.1 LTS (WSL2), AMD Ryzen 9 9900X, stable Rust 1.99.0, seqkit 2.10.1, EMBOSS seqret 6.6.0.0, and hyperfine 1.20.0. Each command had one warmup followed by five measured runs. Tables show the mean and standard deviation. Results vary with the machine and file-cache state.
 
