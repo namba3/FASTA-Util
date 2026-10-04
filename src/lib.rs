@@ -3,10 +3,10 @@ pub mod nucleic_acid;
 
 pub use nucleic_acid::is_nucleic_acid_lut as is_nucleic_acid;
 
-use core::slice;
 use std::{
     fs::File,
     io::{BufRead, BufReader},
+    ops::Range,
     sync::Arc,
 };
 
@@ -37,35 +37,24 @@ impl Iterator for LinesInFile {
 
         let line = self.mmap[self.head..]
             .split_inclusive(|byte| *byte == b'\n')
-            .take(1)
-            .last();
+            .next()?;
+        let start = self.head;
+        self.head += line.len();
 
-        if let Some(line) = line {
-            self.head += line.len();
-            let slice = unsafe {
-                // SAFETY: `line` is a subslice of the read-only mapping. Its pointer and length
-                // describe initialized bytes in that mapping, and the cloned Arc below keeps the
-                // mapping alive for as long as this slice can be accessed through `LineInFile`.
-                slice::from_raw_parts::<'static, _>(line.as_ptr(), line.len())
-            };
-            LineInFile {
-                _mmap: Arc::clone(&self.mmap),
-                slice,
-            }
-            .into()
-        } else {
-            None
-        }
+        Some(LineInFile {
+            mmap: Arc::clone(&self.mmap),
+            range: start..self.head,
+        })
     }
 }
 #[derive(Clone)]
 pub struct LineInFile {
-    _mmap: Arc<memmap2::Mmap>,
-    slice: &'static [u8],
+    mmap: Arc<memmap2::Mmap>,
+    range: Range<usize>,
 }
 impl AsRef<[u8]> for LineInFile {
-    fn as_ref<'a>(&'a self) -> &'a [u8] {
-        self.slice
+    fn as_ref(&self) -> &[u8] {
+        &self.mmap[self.range.clone()]
     }
 }
 fn lines(mmap: memmap2::Mmap) -> LinesInFile {
@@ -194,5 +183,19 @@ mod tests {
         drop(lines);
 
         assert_eq!(clone.as_ref(), b"mapped line\n");
+    }
+
+    #[test]
+    fn lines_keep_distinct_ranges_after_iterator_is_dropped() {
+        let input = TemporaryInput::new(b"same\nsame\nlast");
+        let mut lines = read_lines_from_file(input.open()).unwrap();
+        let first = lines.next().unwrap();
+        let second = lines.next().unwrap();
+        let third = lines.next().unwrap();
+        drop(lines);
+
+        assert_eq!(first.as_ref(), b"same\n");
+        assert_eq!(second.as_ref(), b"same\n");
+        assert_eq!(third.as_ref(), b"last");
     }
 }
