@@ -1,70 +1,18 @@
 use fasta_util::nucleic_acid::{
     NUCLEIC_ACID_SET, is_nucleic_acid_iter, is_nucleic_acid_lut, is_nucleic_acid_match,
 };
+mod support;
+
 use std::{
     env,
     hint::black_box,
     process,
     time::{Duration, Instant},
 };
+use support::{INVALID_BASES, mixed_sequence, parse_config, repeated_bytes, usage};
 
-const DEFAULT_INPUT_SIZE: usize = 10_000;
-const DEFAULT_SAMPLE_MS: u64 = 200;
 const SAMPLE_COUNT: usize = 5;
 const WARMUP_ROUNDS: usize = 10;
-const INVALID_BASES: &[u8] = b"xyz0123?";
-
-struct Config {
-    input_size: usize,
-    sample_duration: Duration,
-}
-
-fn usage() -> &'static str {
-    "Usage: cargo bench --bench nucleic_acid -- [--input-size BYTES] [--sample-ms MS]\n\
-     Defaults: --input-size 10000 --sample-ms 200"
-}
-
-fn parse_config() -> Result<Option<Config>, String> {
-    let mut input_size = DEFAULT_INPUT_SIZE;
-    let mut sample_ms = DEFAULT_SAMPLE_MS;
-    let mut args = env::args().skip(1);
-
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--input-size" => {
-                let value = args
-                    .next()
-                    .ok_or_else(|| format!("missing value for {arg}\n{}", usage()))?;
-                input_size = value
-                    .parse()
-                    .map_err(|_| format!("invalid byte count '{value}' for {arg}\n{}", usage()))?;
-                if input_size == 0 {
-                    return Err(format!("{arg} must be greater than zero\n{}", usage()));
-                }
-            }
-            "--sample-ms" => {
-                let value = args
-                    .next()
-                    .ok_or_else(|| format!("missing value for {arg}\n{}", usage()))?;
-                sample_ms = value
-                    .parse()
-                    .map_err(|_| format!("invalid duration '{value}' for {arg}\n{}", usage()))?;
-                if sample_ms == 0 {
-                    return Err(format!("{arg} must be greater than zero\n{}", usage()));
-                }
-            }
-            // Cargo appends this flag when it launches a custom benchmark target.
-            "--bench" => {}
-            "-h" | "--help" => return Ok(None),
-            _ => return Err(format!("unknown argument '{arg}'\n{}", usage())),
-        }
-    }
-
-    Ok(Some(Config {
-        input_size,
-        sample_duration: Duration::from_millis(sample_ms),
-    }))
-}
 
 fn count_valid<F>(sequence: &[u8], predicate: F) -> usize
 where
@@ -159,31 +107,8 @@ fn benchmark_case(
     }
 }
 
-fn repeated_bytes(bytes: &[u8], input_size: usize) -> Vec<u8> {
-    (0..input_size)
-        .map(|index| bytes[index % bytes.len()])
-        .collect()
-}
-
-fn mixed_sequence(valid_percent: u32, mut state: u32, input_size: usize) -> Vec<u8> {
-    (0..input_size)
-        .map(|_| {
-            // Xorshift32 keeps the generated input deterministic without a dependency.
-            state ^= state << 13;
-            state ^= state >> 17;
-            state ^= state << 5;
-
-            if state % 100 < valid_percent {
-                NUCLEIC_ACID_SET[(state as usize >> 8) % NUCLEIC_ACID_SET.len()]
-            } else {
-                INVALID_BASES[(state as usize >> 8) % INVALID_BASES.len()]
-            }
-        })
-        .collect()
-}
-
 fn main() {
-    let config = match parse_config() {
+    let config = match parse_config(env::args().skip(1)) {
         Ok(Some(config)) => config,
         Ok(None) => {
             println!("{}", usage());
@@ -212,11 +137,11 @@ fn main() {
         ),
         (
             "mixed 50% valid",
-            mixed_sequence(50, 0x9e37_79b9, config.input_size),
+            mixed_sequence(NUCLEIC_ACID_SET, 50, 0x9e37_79b9, config.input_size),
         ),
         (
             "mostly valid (99%)",
-            mixed_sequence(99, 0x243f_6a88, config.input_size),
+            mixed_sequence(NUCLEIC_ACID_SET, 99, 0x243f_6a88, config.input_size),
         ),
     ];
 
