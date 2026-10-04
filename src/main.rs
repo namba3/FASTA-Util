@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use core::panic;
 use crossbeam::channel::{Receiver, unbounded};
 use fasta_util::{is_nucleic_acid, read_lines_from_file, read_lines_from_stdin};
-use std::io::{BufWriter, Write};
+use std::io::{self, BufWriter, Write};
 
 #[derive(Parser)]
 #[command(author, version, about)]
@@ -114,42 +114,60 @@ fn count_sequence_bases<T: AsRef<[u8]>, I: IntoIterator<Item = T>>(iter: I) -> u
     count
 }
 
-fn slice(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
-    let writer_options = {
-        let (start, end_inclusive) = {
-            let range = args.range;
-            let (start, end) = range.split_once("..").expect("invalid range");
-            let start = if start.len() == 0 {
-                None
-            } else {
-                Some(start.parse::<usize>()?)
-            };
-            let end_inclusive = if end.len() == 0 {
-                None
-            } else {
-                if end.starts_with("=") {
-                    let (_, end) = end.split_once("=").unwrap();
-                    Some(end.parse::<usize>()?)
-                } else {
-                    Some(end.parse::<usize>()? - 1)
-                }
-            };
+#[derive(Debug, PartialEq, Eq)]
+struct SequenceRange {
+    start: usize,
+    end_exclusive: Option<usize>,
+}
 
-            if let (Some(start), Some(end_inclusive)) = (start, end_inclusive) {
-                if end_inclusive < start {
-                    panic!("invalid range");
-                }
-            }
+fn invalid_range(message: impl Into<String>) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidInput, message.into())
+}
 
-            (start, end_inclusive)
-        };
-        let chars_per_line = args.chars_per_line.max(1);
-
-        WriterOptions {
-            chars_per_line,
-            start,
-            end_inclusive,
+fn parse_slice_range(range: &str) -> Result<SequenceRange, io::Error> {
+    let parse_index = |value: &str| {
+        value
+            .parse::<usize>()
+            .map_err(|error| invalid_range(format!("invalid range index: {error}")))
+    };
+    let (start, end) = range
+        .split_once("..")
+        .ok_or_else(|| invalid_range("range must contain `..`"))?;
+    let start = if start.is_empty() {
+        0
+    } else {
+        parse_index(start)?
+    };
+    let end_exclusive = if end.is_empty() {
+        None
+    } else if let Some(inclusive_end) = end.strip_prefix('=') {
+        let inclusive_end = parse_index(inclusive_end)?;
+        if inclusive_end < start {
+            return Err(invalid_range("range end precedes range start"));
         }
+        // `usize::MAX + 1` cannot be represented, and is equivalent to an open end
+        // because sequence offsets cannot exceed the addressable slice length.
+        inclusive_end.checked_add(1)
+    } else {
+        Some(parse_index(end)?)
+    };
+
+    if end_exclusive.is_some_and(|end| end < start) {
+        return Err(invalid_range("range end precedes range start"));
+    }
+
+    Ok(SequenceRange {
+        start,
+        end_exclusive,
+    })
+}
+
+fn slice(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
+    let range = parse_slice_range(&args.range)?;
+    let writer_options = WriterOptions {
+        chars_per_line: args.chars_per_line.max(1),
+        start: range.start,
+        end_exclusive: range.end_exclusive,
     };
 
     let output: Box<dyn std::io::Write> = if let Some(path) = args.output {
@@ -213,8 +231,8 @@ fn slice(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
 
 struct WriterOptions {
     chars_per_line: usize,
-    start: Option<usize>,
-    end_inclusive: Option<usize>,
+    start: usize,
+    end_exclusive: Option<usize>,
 }
 struct Writer<T: std::io::Write> {
     inner: BufWriter<T>,
@@ -231,7 +249,7 @@ impl<T: std::io::Write> Writer<T> {
         let WriterOptions {
             chars_per_line,
             start,
-            end_inclusive,
+            end_exclusive,
         } = &mut self.options;
         let writer = &mut self.inner;
 
@@ -260,25 +278,26 @@ impl<T: std::io::Write> Writer<T> {
                 );
             }
 
-            let s = match start.take() {
-                Some(n) if cnt + buf.len() <= n => {
-                    cnt += buf.len();
-                    *start = n.into();
-                    continue;
-                }
-                Some(n) => {
-                    *start = None;
-                    (n - cnt) as usize
-                }
-                None => 0,
-            };
-            let e = match end_inclusive {
-                Some(n) if *n < cnt + buf.len() => *n - cnt,
-                _ => buf.len() - 1,
-            };
+            let line_end = cnt + buf.len();
+            let start_in_line = (*start).saturating_sub(cnt);
+            let end_in_line = end_exclusive
+                .map(|end| end.saturating_sub(cnt).min(buf.len()))
+                .unwrap_or(buf.len());
 
-            let mut bases = &buf[s..=e];
-            let line_written = if s == 0 { written % *chars_per_line } else { 0 };
+            if start_in_line >= end_in_line {
+                cnt = line_end;
+                if end_exclusive.is_some_and(|end| end <= cnt) {
+                    break;
+                }
+                continue;
+            }
+
+            let mut bases = &buf[start_in_line..end_in_line];
+            let line_written = if start_in_line == 0 {
+                written % *chars_per_line
+            } else {
+                0
+            };
             let mut line_remain = *chars_per_line - line_written;
             written += bases.len();
 
@@ -291,12 +310,12 @@ impl<T: std::io::Write> Writer<T> {
 
             writer.write_all(bases)?;
 
-            cnt += buf.len();
-            if let Some(n) = end_inclusive {
-                if *n < cnt {
+            cnt = line_end;
+            if end_exclusive.is_some_and(|end| end <= cnt) {
+                if written > 0 && written % *chars_per_line != 0 {
                     writer.write_all(b"\n")?;
-                    break;
                 }
+                break;
             }
         }
 
@@ -306,7 +325,7 @@ impl<T: std::io::Write> Writer<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Writer, WriterOptions, count_sequence_bases};
+    use super::{SequenceRange, Writer, WriterOptions, count_sequence_bases, parse_slice_range};
     use crossbeam::channel::unbounded;
 
     fn write_fasta(lines: &[&[u8]], options: WriterOptions) -> Vec<u8> {
@@ -321,15 +340,123 @@ mod tests {
         writer.inner.into_inner().unwrap()
     }
 
+    fn write_fasta_for_range(
+        lines: &[&[u8]],
+        range: &str,
+        chars_per_line: usize,
+    ) -> Result<Vec<u8>, std::io::Error> {
+        let range = parse_slice_range(range)?;
+        Ok(write_fasta(
+            lines,
+            WriterOptions {
+                chars_per_line,
+                start: range.start,
+                end_exclusive: range.end_exclusive,
+            },
+        ))
+    }
+
     fn options(
         chars_per_line: usize,
         start: Option<usize>,
-        end_inclusive: Option<usize>,
+        end_exclusive: Option<usize>,
     ) -> WriterOptions {
         WriterOptions {
             chars_per_line,
-            start,
-            end_inclusive,
+            start: start.unwrap_or(0),
+            end_exclusive,
+        }
+    }
+
+    #[test]
+    fn parses_open_and_bounded_range_forms() {
+        let cases = [
+            (
+                "..",
+                SequenceRange {
+                    start: 0,
+                    end_exclusive: None,
+                },
+            ),
+            (
+                "2..",
+                SequenceRange {
+                    start: 2,
+                    end_exclusive: None,
+                },
+            ),
+            (
+                "..10",
+                SequenceRange {
+                    start: 0,
+                    end_exclusive: Some(10),
+                },
+            ),
+            (
+                "2..10",
+                SequenceRange {
+                    start: 2,
+                    end_exclusive: Some(10),
+                },
+            ),
+            (
+                "2..=10",
+                SequenceRange {
+                    start: 2,
+                    end_exclusive: Some(11),
+                },
+            ),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(parse_slice_range(input).unwrap(), expected, "range {input}");
+        }
+    }
+
+    #[test]
+    fn accepts_empty_ranges_without_underflow() {
+        let cases = [
+            (
+                "..0",
+                SequenceRange {
+                    start: 0,
+                    end_exclusive: Some(0),
+                },
+            ),
+            (
+                "2..2",
+                SequenceRange {
+                    start: 2,
+                    end_exclusive: Some(2),
+                },
+            ),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(parse_slice_range(input).unwrap(), expected, "range {input}");
+        }
+
+        let max_inclusive = format!("..={}", usize::MAX);
+        assert_eq!(
+            parse_slice_range(&max_inclusive).unwrap(),
+            SequenceRange {
+                start: 0,
+                end_exclusive: None
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_malformed_and_reversed_ranges_with_input_errors() {
+        for input in [
+            "10", "one..2", "2..=nope", "10..2", "10..=1", "2..=1", "..=",
+        ] {
+            let error = parse_slice_range(input).unwrap_err();
+            assert_eq!(
+                error.kind(),
+                std::io::ErrorKind::InvalidInput,
+                "range {input}"
+            );
         }
     }
 
@@ -363,7 +490,7 @@ mod tests {
     fn slice_uses_inclusive_indices_across_sequence_lines() {
         let output = write_fasta(
             &[b">record\n", b"ACGT\n", b"NU-\n"],
-            options(2, Some(2), Some(4)),
+            options(2, Some(2), Some(5)),
         );
 
         assert_eq!(output, b">record\nGT\nN\n");
@@ -383,17 +510,27 @@ mod tests {
     fn slice_starting_at_a_line_boundary_uses_the_next_line() {
         let output = write_fasta(
             &[b">record\n", b"ACGT\n", b"NU\n"],
-            options(10, Some(4), Some(5)),
+            options(10, Some(4), Some(6)),
         );
 
         assert_eq!(output, b">record\nNU\n");
     }
 
     #[test]
-    fn slice_stops_at_the_inclusive_end() {
-        let output = write_fasta(&[b">record\n", b"ACGT\n"], options(10, None, Some(2)));
+    fn empty_slice_range_writes_no_sequence_bases() {
+        let output = write_fasta_for_range(&[b">record\n", b"ACGT\n"], "..0", 10).unwrap();
 
-        assert_eq!(output, b">record\nACG\n");
+        assert_eq!(output, b">record\n");
+    }
+
+    #[test]
+    fn exclusive_and_inclusive_range_text_selects_expected_bases() {
+        let input = &[b">record\n".as_slice(), b"ACGTNU\n".as_slice()];
+        let exclusive = write_fasta_for_range(input, "2..4", 10).unwrap();
+        let inclusive = write_fasta_for_range(input, "2..=4", 10).unwrap();
+
+        assert_eq!(exclusive, b">record\nGT\n");
+        assert_eq!(inclusive, b">record\nGTN\n");
     }
 
     #[test]
