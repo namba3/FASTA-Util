@@ -106,9 +106,14 @@ fn len(args: LenArgs) -> Result<(), Box<dyn std::error::Error>> {
         None => count_sequence_bases(read_lines_from_stdin())?,
     };
 
-    println!("{len}");
+    let stdout = io::stdout();
+    write_length(&mut stdout.lock(), len)?;
 
     Ok(())
+}
+
+fn write_length(writer: &mut impl Write, length: u64) -> io::Result<()> {
+    writeln!(writer, "{length}")
 }
 
 fn validated_sequence(line: &[u8]) -> io::Result<&[u8]> {
@@ -480,7 +485,7 @@ impl<T: std::io::Write> Writer<T> {
 mod tests {
     use super::{
         Args, SequenceRange, Writer, WriterOptions, count_sequence_bases, count_sequence_line,
-        parse_slice_range, strip_line_ending, validated_sequence,
+        parse_slice_range, strip_line_ending, validated_sequence, write_length,
     };
     use clap::Parser;
     use crossbeam::channel::unbounded;
@@ -677,6 +682,37 @@ mod tests {
             count_sequence_bases([Ok::<_, std::io::Error>(b"aCgTn".as_slice())]).unwrap(),
             5
         );
+    }
+
+    #[test]
+    fn len_writes_the_result_with_a_newline() {
+        let mut output = Vec::new();
+
+        write_length(&mut output, 42).unwrap();
+
+        assert_eq!(output, b"42\n");
+    }
+
+    #[test]
+    fn len_propagates_output_write_errors() {
+        struct FailingWriter;
+
+        impl std::io::Write for FailingWriter {
+            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "output closed",
+                ))
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let error = write_length(&mut FailingWriter, 42).unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe);
     }
 
     #[test]
