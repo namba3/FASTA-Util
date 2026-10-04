@@ -1,102 +1,15 @@
+mod output;
+
 use clap::{Parser, Subcommand};
 use crossbeam::channel::{Receiver, bounded};
 use fasta_util::{is_nucleic_acid, read_lines_from_file, read_lines_from_stdin};
+use output::TemporaryOutput;
 use std::{
-    fs::{self, File, OpenOptions, Permissions},
     io::{self, BufWriter, Write},
     path::{Path, PathBuf},
-    sync::atomic::{AtomicUsize, Ordering},
 };
 
 const LINE_CHANNEL_CAPACITY: usize = 32;
-static NEXT_TEMP_OUTPUT_ID: AtomicUsize = AtomicUsize::new(0);
-
-struct TemporaryOutput {
-    destination: PathBuf,
-    temporary: PathBuf,
-    file: Option<File>,
-    permissions: Option<Permissions>,
-    committed: bool,
-}
-
-impl TemporaryOutput {
-    fn create(destination: &Path) -> io::Result<Self> {
-        let destination = match fs::canonicalize(destination) {
-            Ok(path) => path,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => destination.to_path_buf(),
-            Err(error) => return Err(error),
-        };
-        let permissions = match fs::metadata(&destination) {
-            Ok(metadata) => Some(metadata.permissions()),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
-            Err(error) => return Err(error),
-        };
-        let parent = destination
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-            .unwrap_or_else(|| Path::new("."));
-        if destination.file_name().is_none() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "output path has no file name",
-            ));
-        }
-
-        loop {
-            let id = NEXT_TEMP_OUTPUT_ID.fetch_add(1, Ordering::Relaxed);
-            let temporary = parent.join(format!(".fasta-util-{}-{id}.tmp", std::process::id()));
-            match OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&temporary)
-            {
-                Ok(file) => {
-                    return Ok(Self {
-                        destination,
-                        temporary,
-                        file: Some(file),
-                        permissions,
-                        committed: false,
-                    });
-                }
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
-                Err(error) => return Err(error),
-            }
-        }
-    }
-
-    fn take_file(&mut self) -> io::Result<File> {
-        self.file.take().ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "temporary output was already opened",
-            )
-        })
-    }
-
-    fn commit(&mut self) -> io::Result<()> {
-        if self.file.is_some() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "temporary output is still open",
-            ));
-        }
-        if let Some(permissions) = self.permissions.take() {
-            fs::set_permissions(&self.temporary, permissions)?;
-        }
-        fs::rename(&self.temporary, &self.destination)?;
-        self.committed = true;
-        Ok(())
-    }
-}
-
-impl Drop for TemporaryOutput {
-    fn drop(&mut self) {
-        if !self.committed {
-            let _ = fs::remove_file(&self.temporary);
-        }
-    }
-}
 
 #[derive(Parser)]
 #[command(author, version, about)]
