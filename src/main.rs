@@ -98,6 +98,14 @@ fn len(args: LenArgs) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn validated_sequence(line: &[u8]) -> io::Result<&[u8]> {
+    let sequence = line.trim_ascii_start().trim_ascii_end();
+    if let Some(byte) = sequence.iter().find(|byte| !is_nucleic_acid(**byte)) {
+        return Err(invalid_nucleic_acid(*byte));
+    }
+    Ok(sequence)
+}
+
 fn count_sequence_bases<T, I>(iter: I) -> io::Result<u64>
 where
     T: AsRef<[u8]>,
@@ -112,12 +120,9 @@ where
             continue;
         }
 
-        let sequence = line.trim_ascii_start().trim_ascii_end();
+        let sequence = validated_sequence(line)?;
         if sequence.is_empty() {
             continue;
-        }
-        if let Some(x) = sequence.iter().find(|x| !is_nucleic_acid(**x)) {
-            return Err(invalid_nucleic_acid(*x));
         }
 
         count += sequence.len() as u64;
@@ -302,12 +307,9 @@ impl<T: std::io::Write> Writer<T> {
                 continue;
             }
 
-            let buf = buf.trim_ascii_start().trim_ascii_end();
+            let buf = validated_sequence(buf)?;
             if buf.len() == 0 {
                 continue;
-            }
-            if let Some(x) = buf.iter().find(|x| !is_nucleic_acid(**x)) {
-                return Err(invalid_nucleic_acid(*x));
             }
 
             let line_end = cnt + buf.len();
@@ -359,7 +361,7 @@ impl<T: std::io::Write> Writer<T> {
 mod tests {
     use super::{
         Args, SequenceRange, Writer, WriterOptions, count_sequence_bases, parse_slice_range,
-        strip_line_ending,
+        strip_line_ending, validated_sequence,
     };
     use clap::Parser;
     use crossbeam::channel::unbounded;
@@ -523,6 +525,20 @@ mod tests {
             count_sequence_bases(lines.into_iter().map(Ok::<_, std::io::Error>)).unwrap(),
             7
         );
+    }
+
+    #[test]
+    fn validated_sequence_trims_whitespace_and_accepts_empty_lines() {
+        assert_eq!(validated_sequence(b" \tACGT-\r\n").unwrap(), b"ACGT-");
+        assert!(validated_sequence(b" \t\r\n").unwrap().is_empty());
+    }
+
+    #[test]
+    fn validated_sequence_reports_invalid_symbols_after_trimming() {
+        let error = validated_sequence(b" \tACX\r\n").unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("invalid nucleic acid"));
     }
 
     #[test]
