@@ -47,6 +47,12 @@ SUDKUGDWWTSSYBUCKYUDSAADMMRHMT
 
 ## 簡単なテストとベンチマーク
 
+塩基判定方式のベンチマークを実行するには、次のコマンドを使います。
+
+```sh
+cargo bench --bench nucleic_acid
+```
+
 OS: Ubuntu (WSL2)
 
 CPU: AMD Ryzen 9 5900X

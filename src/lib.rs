@@ -1,5 +1,3 @@
-#![cfg_attr(test, feature(test))]
-
 pub mod amino_acid;
 pub mod nucleic_acid;
 

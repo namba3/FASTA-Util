@@ -47,6 +47,12 @@ SUDKUGDWWTSSYBUCKYUDSAADMMRHMT
 
 ## Simple tests and benchmarks
 
+Run the nucleotide-check benchmark with:
+
+```sh
+cargo bench --bench nucleic_acid
+```
+
 OS: Ubuntu (WSL2)
 
 CPU: AMD Ryzen 9 5900X
