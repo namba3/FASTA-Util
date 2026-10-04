@@ -1,5 +1,4 @@
 use clap::{Parser, Subcommand};
-use core::panic;
 use crossbeam::channel::{Receiver, unbounded};
 use fasta_util::{is_nucleic_acid, read_lines_from_file, read_lines_from_stdin};
 use std::io::{self, BufWriter, Write};
@@ -76,12 +75,9 @@ fn len(args: LenArgs) -> Result<(), Box<dyn std::error::Error>> {
         Some(input) => {
             let input = std::fs::OpenOptions::new().read(true).open(input)?;
             let lines = read_lines_from_file(input)?;
-            count_sequence_bases(lines)
+            count_sequence_bases(lines.map(Ok::<_, io::Error>))?
         }
-        None => {
-            let lines = read_lines_from_stdin().filter_map(|x| x.ok());
-            count_sequence_bases(lines)
-        }
+        None => count_sequence_bases(read_lines_from_stdin())?,
     };
 
     println!("{len}");
@@ -89,9 +85,14 @@ fn len(args: LenArgs) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn count_sequence_bases<T: AsRef<[u8]>, I: IntoIterator<Item = T>>(iter: I) -> u64 {
+fn count_sequence_bases<T, I>(iter: I) -> io::Result<u64>
+where
+    T: AsRef<[u8]>,
+    I: IntoIterator<Item = Result<T, io::Error>>,
+{
     let mut count = 0u64;
     for line in iter {
+        let line = line?;
         let line = line.as_ref();
 
         if line.first() == Some(&b'>') {
@@ -103,15 +104,22 @@ fn count_sequence_bases<T: AsRef<[u8]>, I: IntoIterator<Item = T>>(iter: I) -> u
             continue;
         }
         if let Some(x) = sequence.iter().find(|x| !is_nucleic_acid(**x)) {
-            panic!(
-                "invalid nucleic acid: '{}' (0x{x:0x})",
-                char::from_u32(*x as u32).unwrap()
-            );
+            return Err(invalid_nucleic_acid(*x));
         }
 
         count += sequence.len() as u64;
     }
-    count
+    Ok(count)
+}
+
+fn invalid_nucleic_acid(byte: u8) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!(
+            "invalid nucleic acid: {:?} (0x{byte:02x})",
+            char::from(byte)
+        ),
+    )
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -184,47 +192,49 @@ fn slice(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     let mut writer = Writer::new(output, writer_options);
 
-    let hndl = match args.input {
+    let (hndl, write_result) = match args.input {
         Some(input) => {
             let input = std::fs::OpenOptions::new().read(true).open(input)?;
             let (tx, rx) = unbounded();
             let hndl = std::thread::spawn(move || -> Result<(), std::io::Error> {
                 let mut lines = read_lines_from_file(input)?;
                 while let Some(line) = lines.next() {
-                    if let Err(_) = tx.send(line) {
+                    if tx.send(Ok(line)).is_err() {
                         break;
-                    };
+                    }
                 }
                 Ok(())
             });
 
-            writer.run(rx)?;
-            hndl
+            let write_result = writer.run(rx);
+            (hndl, write_result)
         }
         None => {
             let (tx, rx) = unbounded();
             let hndl = std::thread::spawn(move || -> Result<(), std::io::Error> {
                 let mut lines = read_lines_from_stdin();
-                while let Some(Ok(line)) = lines.next() {
-                    if let Err(_) = tx.send(line) {
+                while let Some(line) = lines.next() {
+                    if tx.send(line).is_err() {
                         break;
-                    };
+                    }
                 }
 
                 Ok(())
             });
 
-            writer.run(rx)?;
-            hndl
+            let write_result = writer.run(rx);
+            (hndl, write_result)
         }
     };
 
-    match hndl.join() {
-        Ok(x) => x?,
-        Err(_why) => {
-            panic!("error: read thread panicked.");
-        }
-    }
+    let read_result = hndl.join().unwrap_or_else(|_| {
+        Err(io::Error::new(
+            io::ErrorKind::Other,
+            "input reader thread panicked",
+        ))
+    });
+    write_result?;
+    read_result?;
 
     Ok(())
 }
@@ -245,7 +255,10 @@ impl<T: std::io::Write> Writer<T> {
             options,
         }
     }
-    fn run<Buf: AsRef<[u8]>>(&mut self, rx: Receiver<Buf>) -> Result<(), std::io::Error> {
+    fn run<Buf: AsRef<[u8]>>(
+        &mut self,
+        rx: Receiver<Result<Buf, io::Error>>,
+    ) -> Result<(), std::io::Error> {
         let WriterOptions {
             chars_per_line,
             start,
@@ -256,8 +269,9 @@ impl<T: std::io::Write> Writer<T> {
         let mut cnt = 0usize;
         let mut written = 0usize;
 
-        while let Ok(buf) = rx.recv() {
-            let buf = buf.as_ref();
+        while let Ok(line) = rx.recv() {
+            let line = line?;
+            let buf = line.as_ref();
 
             if let Some(b'>') = buf.first() {
                 if written > 0 && written % *chars_per_line != 0 {
@@ -272,10 +286,7 @@ impl<T: std::io::Write> Writer<T> {
                 continue;
             }
             if let Some(x) = buf.iter().find(|x| !is_nucleic_acid(**x)) {
-                panic!(
-                    "invalid nucleic acid: '{}' (0x{x:0x})",
-                    char::from_u32(*x as u32).unwrap()
-                );
+                return Err(invalid_nucleic_acid(*x));
             }
 
             let line_end = cnt + buf.len();
@@ -329,15 +340,22 @@ mod tests {
     use crossbeam::channel::unbounded;
 
     fn write_fasta(lines: &[&[u8]], options: WriterOptions) -> Vec<u8> {
+        write_fasta_result(lines, options).unwrap()
+    }
+
+    fn write_fasta_result(
+        lines: &[&[u8]],
+        options: WriterOptions,
+    ) -> Result<Vec<u8>, std::io::Error> {
         let (tx, rx) = unbounded();
         for line in lines {
-            tx.send(*line).unwrap();
+            tx.send(Ok(*line)).unwrap();
         }
         drop(tx);
 
         let mut writer = Writer::new(Vec::new(), options);
-        writer.run(rx).unwrap();
-        writer.inner.into_inner().unwrap()
+        writer.run(rx)?;
+        Ok(writer.inner.into_inner().unwrap())
     }
 
     fn write_fasta_for_range(
@@ -470,13 +488,29 @@ mod tests {
             b">record 2\n",
         ];
 
-        assert_eq!(count_sequence_bases(lines), 7);
+        assert_eq!(
+            count_sequence_bases(lines.into_iter().map(Ok::<_, std::io::Error>)).unwrap(),
+            7
+        );
     }
 
     #[test]
-    #[should_panic(expected = "invalid nucleic acid")]
     fn len_rejects_invalid_sequence_symbols() {
-        count_sequence_bases([b"ACX".as_slice()]);
+        let error = count_sequence_bases([Ok::<_, std::io::Error>(b"ACX".as_slice())]).unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("invalid nucleic acid"));
+    }
+
+    #[test]
+    fn len_propagates_input_read_errors() {
+        let error = count_sequence_bases([Err::<&[u8], _>(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "read failed",
+        ))])
+        .unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
     }
 
     #[test]
@@ -544,8 +578,26 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "invalid nucleic acid")]
     fn slice_rejects_invalid_sequence_symbols() {
-        let _ = write_fasta(&[b"ACX\n"], options(10, None, None));
+        let error = write_fasta_result(&[b"ACX\n"], options(10, None, None)).unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("invalid nucleic acid"));
+    }
+
+    #[test]
+    fn slice_propagates_input_read_errors() {
+        let (tx, rx) = unbounded();
+        let input_error: Result<&[u8], std::io::Error> = Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "read failed",
+        ));
+        tx.send(input_error).unwrap();
+        drop(tx);
+
+        let mut writer = Writer::new(Vec::new(), options(10, None, None));
+        let error = writer.run(rx).unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
     }
 }
