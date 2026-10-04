@@ -54,6 +54,7 @@ struct SliceArgs {
     #[arg(
         long,
         default_value_t = 60,
+        value_parser = parse_positive_line_width,
         help = "Specify the number of characters per line when exporting a sequence"
     )]
     chars_per_line: usize,
@@ -68,6 +69,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+fn parse_positive_line_width(value: &str) -> Result<usize, String> {
+    let width = value
+        .parse::<usize>()
+        .map_err(|error| format!("invalid characters-per-line value: {error}"))?;
+    if width == 0 {
+        return Err("characters per line must be greater than zero".to_owned());
+    }
+    Ok(width)
 }
 
 fn len(args: LenArgs) -> Result<(), Box<dyn std::error::Error>> {
@@ -173,7 +184,7 @@ fn parse_slice_range(range: &str) -> Result<SequenceRange, io::Error> {
 fn slice(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
     let range = parse_slice_range(&args.range)?;
     let writer_options = WriterOptions {
-        chars_per_line: args.chars_per_line.max(1),
+        chars_per_line: args.chars_per_line,
         start: range.start,
         end_exclusive: range.end_exclusive,
     };
@@ -336,7 +347,10 @@ impl<T: std::io::Write> Writer<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::{SequenceRange, Writer, WriterOptions, count_sequence_bases, parse_slice_range};
+    use super::{
+        Args, SequenceRange, Writer, WriterOptions, count_sequence_bases, parse_slice_range,
+    };
+    use clap::Parser;
     use crossbeam::channel::unbounded;
 
     fn write_fasta(lines: &[&[u8]], options: WriterOptions) -> Vec<u8> {
@@ -384,6 +398,12 @@ mod tests {
             start: start.unwrap_or(0),
             end_exclusive,
         }
+    }
+
+    #[test]
+    fn slice_requires_a_positive_line_width() {
+        assert!(Args::try_parse_from(["fasta-util", "slice", "--chars-per-line", "0"]).is_err());
+        assert!(Args::try_parse_from(["fasta-util", "slice", "--chars-per-line", "1"]).is_ok());
     }
 
     #[test]
