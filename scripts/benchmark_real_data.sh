@@ -8,8 +8,9 @@ rustup_bin="$(command -v rustup || true)"
 seqkit="$(command -v seqkit || true)"
 seqret="$(command -v seqret || true)"
 hyperfine="$(command -v hyperfine || true)"
+awk_bin="$(command -v awk || true)"
 
-for tool in "$rustup_bin" "$seqkit" "$seqret" "$hyperfine"; do
+for tool in "$rustup_bin" "$seqkit" "$seqret" "$hyperfine" "$awk_bin"; do
     if [[ -z "$tool" || ! -x "$tool" ]]; then
         printf 'Required command not found: %s\n' "${tool:-seqkit/seqret/hyperfine}" >&2
         exit 1
@@ -25,8 +26,10 @@ fi
 work_dir="$(mktemp -d)"
 trap 'rm -rf "$work_dir"' EXIT
 chr1="$work_dir/chr1.fna"
+fai="$chr1.fai"
 # Keep lowercase soft-masking from the original FASTA in the benchmark input.
 "$seqkit" grep -p NC_000001.11 "$dataset" > "$chr1"
+LC_ALL=C "$awk_bin" -f "$repo_root/scripts/write_fai.awk" "$chr1" > "$fai"
 
 printf '%s\n' 'Tool versions:'
 "$seqkit" version
@@ -35,7 +38,7 @@ printf '%s\n' 'Tool versions:'
 printf '\n%s\n' 'Dataset statistics:'
 printf 'Source: %s\n' "$dataset"
 printf 'Benchmark input: original FASTA, preserving lowercase soft-masking\n'
-stat -c '%n: %s bytes' "$dataset" "$chr1"
+stat -c '%n: %s bytes' "$dataset" "$chr1" "$fai"
 "$seqkit" stats "$dataset" "$chr1"
 printf 'fasta-util len (assembly): '
 "$binary" len -i "$dataset"
@@ -51,6 +54,7 @@ q_chr1="$(q "$chr1")"
 q_binary="$(q "$binary")"
 q_seqkit="$(q "$seqkit")"
 q_seqret="$(q "$seqret")"
+q_fai="$(q "$fai")"
 
 printf '\n%s\n' 'Full assembly length benchmark (1 warmup, 5 measured runs):'
 "$hyperfine" --shell=none --warmup 1 --runs 5 --style basic \
@@ -64,10 +68,12 @@ while read -r name start length; do
     seqret_end=$((start + length))
     seqret_command="$q_seqret -sequence $q_chr1 -sbegin $seqret_start -send $seqret_end -auto -stdout"
     fasta_command="$q_binary slice -i $q_chr1 --chars-per-line=60 --range ${start}..=${end}"
+    indexed_command="$q_binary slice -i $q_chr1 --fai-index $q_fai --chars-per-line=60 --range ${start}..=${end}"
 
     "$seqret" -sequence "$chr1" -sbegin "$seqret_start" -send "$seqret_end" -auto -stdout > "$work_dir/seqret.out"
     "$binary" slice -i "$chr1" --chars-per-line=60 --range "${start}..=${end}" > "$work_dir/fasta-util.out"
-    if ! cmp -s "$work_dir/seqret.out" "$work_dir/fasta-util.out"; then
+    "$binary" slice -i "$chr1" --fai-index "$fai" --chars-per-line=60 --range "${start}..=${end}" > "$work_dir/fasta-util-indexed.out"
+    if ! cmp -s "$work_dir/seqret.out" "$work_dir/fasta-util.out" || ! cmp -s "$work_dir/fasta-util.out" "$work_dir/fasta-util-indexed.out"; then
         printf 'Output mismatch for slice case %s\n' "$name" >&2
         exit 1
     fi
@@ -75,7 +81,8 @@ while read -r name start length; do
     printf '\n%s\n' "$name: offset=$start length=$length"
     "$hyperfine" --shell=none --warmup 1 --runs 5 --style basic \
         -n seqret "$seqret_command" \
-        -n fasta-util "$fasta_command"
+        -n fasta-util "$fasta_command" \
+        -n 'fasta-util (FAI)' "$indexed_command"
 done <<'CASES'
 middle_100M 100000000 100000000
 middle_100K 100000000 100000
