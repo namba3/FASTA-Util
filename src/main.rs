@@ -289,6 +289,9 @@ impl<T: std::io::Write> Writer<T> {
                     writer.write_all(b"\n")?;
                 }
                 writer.write_all(&*buf)?;
+                if !buf.ends_with(b"\n") {
+                    writer.write_all(b"\n")?;
+                }
                 continue;
             }
 
@@ -595,6 +598,13 @@ mod tests {
         );
 
         assert_eq!(output, b">first\nAC\n>second\nGT");
+    }
+
+    #[test]
+    fn slice_terminates_headers_without_a_line_ending() {
+        let output = write_fasta(&[b">record", b"ACGT"], options(10, None, None));
+
+        assert_eq!(output, b">record\nACGT");
     }
 
     #[test]
