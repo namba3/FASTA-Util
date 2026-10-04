@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install stable Rust and rustfmt
+        uses: actions-rust-lang/setup-rust-toolchain@v2
+        with:
+          toolchain: stable
+          components: rustfmt
+
+      - name: Check formatting
+        run: |
+          cargo fmt --all -- --check
+          cargo fmt --manifest-path generate_random_data/Cargo.toml -- --check
+
+      - name: Test main crate
+        run: cargo test --locked
+
+      - name: Test random-data generator
+        run: cargo test --manifest-path generate_random_data/Cargo.toml --locked
+
+      - name: Build main crate
+        run: cargo build --release --locked
+
+      - name: Build random-data generator
+        run: cargo build --release --manifest-path generate_random_data/Cargo.toml --locked
+
+      - name: Compile custom benchmark
+        run: cargo bench --bench nucleic_acid --locked --no-run
