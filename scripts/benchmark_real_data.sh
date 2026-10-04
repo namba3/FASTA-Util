@@ -45,7 +45,9 @@ fi
 printf '\n%s\n' 'Dataset statistics:'
 printf 'Source: %s\n' "$dataset"
 printf 'Benchmark input: original FASTA, preserving lowercase soft-masking\n'
-stat -c '%n: %s bytes' "$dataset" "$chr1" "$fai"
+printf '%s: %s bytes\n' "$dataset" "$(wc -c < "$dataset" | awk '{print $1}')"
+printf '%s: %s bytes\n' "$chr1" "$(wc -c < "$chr1" | awk '{print $1}')"
+printf '%s: %s bytes\n' "$fai" "$(wc -c < "$fai" | awk '{print $1}')"
 "$seqkit" stats "$dataset" "$chr1"
 printf 'fasta-util len (assembly): '
 "$binary" len -i "$dataset"
