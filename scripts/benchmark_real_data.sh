@@ -24,11 +24,9 @@ fi
 
 work_dir="$(mktemp -d)"
 trap 'rm -rf "$work_dir"' EXIT
-normalized="$work_dir/genome_upper.fna"
 chr1="$work_dir/chr1.fna"
-# fasta-util accepts uppercase nucleic acid symbols; preserve sequence data and normalize case.
-"$seqkit" seq --upper-case "$dataset" > "$normalized"
-"$seqkit" grep -p NC_000001.11 "$normalized" > "$chr1"
+# Keep lowercase soft-masking from the original FASTA in the benchmark input.
+"$seqkit" grep -p NC_000001.11 "$dataset" > "$chr1"
 
 printf '%s\n' 'Tool versions:'
 "$seqkit" version
@@ -36,11 +34,11 @@ printf '%s\n' 'Tool versions:'
 "$rustup_bin" run stable rustc --version
 printf '\n%s\n' 'Dataset statistics:'
 printf 'Source: %s\n' "$dataset"
-printf 'Benchmark input: source FASTA uppercased with seqkit --upper-case\n'
-stat -c '%n: %s bytes' "$normalized" "$chr1"
-"$seqkit" stats "$normalized" "$chr1"
+printf 'Benchmark input: original FASTA, preserving lowercase soft-masking\n'
+stat -c '%n: %s bytes' "$dataset" "$chr1"
+"$seqkit" stats "$dataset" "$chr1"
 printf 'fasta-util len (assembly): '
-"$binary" len -i "$normalized"
+"$binary" len -i "$dataset"
 printf 'fasta-util len (chr1): '
 "$binary" len -i "$chr1"
 
@@ -48,7 +46,7 @@ q() {
     printf '%q' "$1"
 }
 
-q_dataset="$(q "$normalized")"
+q_dataset="$(q "$dataset")"
 q_chr1="$(q "$chr1")"
 q_binary="$(q "$binary")"
 q_seqkit="$(q "$seqkit")"

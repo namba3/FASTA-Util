@@ -92,7 +92,7 @@ cargo bench --bench nucleic_acid -- --input-size 100000 --sample-ms 500
 
 Measurements were taken on 2026-10-04 using the RefSeq GRCh38.p14 FASTA in `dataset/ncbi_dataset`. The full-genome length comparison used `GCF_000001405.40_GRCh38.p14_genomic.fna` (3,339,739,109 bytes), containing 705 records. Slice comparisons used its chromosome 1 record (`NC_000001.11`, 248,956,422 bases).
 
-The source FASTA contains lowercase soft-masked sequence. At the time of this measurement, the tool accepted uppercase symbols only, so a temporary copy was created with `seqkit seq --upper-case` before comparison. Base counts and record structure were preserved. Before timing each slice case, the `seqret` and `fasta-util` outputs were verified byte-for-byte.
+The benchmark used the source FASTA directly and preserved its lowercase soft-masked sequence. Before timing each slice case, the `seqret` and `fasta-util` outputs were verified byte-for-byte.
 
 Environment: Ubuntu 26.04.1 LTS (WSL2), AMD Ryzen 9 9900X, stable Rust 1.99.0, seqkit 2.10.1, EMBOSS seqret 6.6.0.0, and hyperfine 1.20.0. Each command had one warmup followed by five measured runs. Tables show the mean and standard deviation. Results vary with the machine and file-cache state.
 
@@ -102,8 +102,8 @@ Environment: Ubuntu 26.04.1 LTS (WSL2), AMD Ryzen 9 9900X, stable Rust 1.99.0, s
 
 | Command | Result | Time (mean ± standard deviation) |
 | --- | ---: | ---: |
-| `seqkit stats` | 3,298,430,636 bases, 705 records | 2,641 ± 428 ms |
-| `fasta-util len` | 3,298,430,636 bases | 2,821 ± 184 ms |
+| `seqkit stats` | 3,298,430,636 bases, 705 records | 2,341 ± 196 ms |
+| `fasta-util len` | 3,298,430,636 bases | 2,987 ± 244 ms |
 
 ### slice
 
@@ -111,12 +111,12 @@ Ranges are positions within chromosome 1. `seqret` uses one-based inclusive coor
 
 | Offset | Slice length | seqret (mean ± standard deviation) | fasta-util (mean ± standard deviation) |
 | ---: | ---: | ---: | ---: |
-| 100,000,000 | 100,000,000 | 1,182 ± 172 ms | 988 ± 190 ms |
-| 100,000,000 | 100,000 | 832 ± 69 ms | 405 ± 28 ms |
-| 100,000,000 | 100 | 799 ± 34 ms | 300 ± 59 ms |
-| 0 | 100,000,000 | 975 ± 104 ms | 547 ± 151 ms |
-| 0 | 100,000 | 953 ± 199 ms | 3.4 ± 0.8 ms |
-| 0 | 100 | 853 ± 98 ms | 2.3 ± 0.3 ms |
+| 100,000,000 | 100,000,000 | 963 ± 75 ms | 807 ± 118 ms |
+| 100,000,000 | 100,000 | 941 ± 99 ms | 397 ± 14 ms |
+| 100,000,000 | 100 | 649 ± 157 ms | 310 ± 58 ms |
+| 0 | 100,000,000 | 807 ± 63 ms | 260 ± 33 ms |
+| 0 | 100,000 | 603 ± 49 ms | 2.7 ± 0.6 ms |
+| 0 | 100 | 655 ± 53 ms | 2.0 ± 0.2 ms |
 
 To reproduce these measurements, install `seqkit`, `seqret`, `hyperfine`, and stable Rust, then run this script from the repository root. An alternate FASTA path can be supplied as the first argument.
 
