@@ -1,5 +1,4 @@
-#![feature(test)]
-#![feature(once_cell)]
+#![cfg_attr(test, feature(test))]
 #![feature(slice_from_ptr_range)]
 
 pub mod amino_acid;
@@ -72,5 +71,96 @@ fn lines(mmap: memmap2::Mmap) -> LinesInFile {
     LinesInFile {
         mmap: mmap,
         head: 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::read_lines_from_file;
+    use std::{
+        fs::{self, File, OpenOptions},
+        io::Write,
+        path::PathBuf,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
+
+    static NEXT_TEMP_FILE_ID: AtomicUsize = AtomicUsize::new(0);
+
+    struct TemporaryInput(PathBuf);
+
+    impl TemporaryInput {
+        fn new(contents: &[u8]) -> Self {
+            loop {
+                let id = NEXT_TEMP_FILE_ID.fetch_add(1, Ordering::Relaxed);
+                let path = std::env::temp_dir()
+                    .join(format!("fasta-util-lines-{}-{id}.tmp", std::process::id()));
+                match OpenOptions::new().write(true).create_new(true).open(&path) {
+                    Ok(mut file) => {
+                        file.write_all(contents).unwrap();
+                        return Self(path);
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                    Err(error) => panic!("failed to create temporary input: {error}"),
+                }
+            }
+        }
+
+        fn open(&self) -> File {
+            File::open(&self.0).unwrap()
+        }
+    }
+
+    impl Drop for TemporaryInput {
+        fn drop(&mut self) {
+            let _ = fs::remove_file(&self.0);
+        }
+    }
+
+    #[test]
+    fn reads_each_line_including_its_newline() {
+        let input = TemporaryInput::new(b">record\nACGT\nsecond line");
+        let lines = read_lines_from_file(input.open())
+            .unwrap()
+            .map(|line| line.as_ref().to_vec())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            lines,
+            [
+                b">record\n".to_vec(),
+                b"ACGT\n".to_vec(),
+                b"second line".to_vec()
+            ]
+        );
+    }
+
+    #[test]
+    fn does_not_yield_an_extra_line_after_a_trailing_newline() {
+        let input = TemporaryInput::new(b"first\nsecond\n");
+        let lines = read_lines_from_file(input.open())
+            .unwrap()
+            .map(|line| line.as_ref().to_vec())
+            .collect::<Vec<_>>();
+
+        assert_eq!(lines, [b"first\n".to_vec(), b"second\n".to_vec()]);
+    }
+
+    #[test]
+    fn empty_file_has_no_lines() {
+        let input = TemporaryInput::new(b"");
+
+        assert_eq!(read_lines_from_file(input.open()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn line_clone_keeps_mapped_bytes_alive_after_iterator_is_dropped() {
+        let input = TemporaryInput::new(b"mapped line\n");
+        let mut lines = read_lines_from_file(input.open()).unwrap();
+        let line = lines.next().unwrap();
+        let clone = line.clone();
+        drop(lines);
+
+        assert_eq!(line.as_ref(), b"mapped line\n");
+        assert_eq!(clone.as_ref(), b"mapped line\n");
     }
 }

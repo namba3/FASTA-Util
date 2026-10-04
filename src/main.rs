@@ -1,5 +1,3 @@
-#![feature(byte_slice_trim_ascii)]
-
 use clap::{Parser, Subcommand};
 use core::panic;
 use crossbeam::channel::{unbounded, Receiver};
@@ -72,47 +70,48 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+
 fn len(args: LenArgs) -> Result<(), Box<dyn std::error::Error>> {
-    fn count<T: AsRef<[u8]>, I: Iterator<Item = T>>(mut iter: I) -> u64 {
-        let mut cnt = 0u64;
-        while let Some(buf) = iter.next() {
-            let buf = buf.as_ref();
-
-            if buf[0] == b'>' {
-                continue;
-            }
-
-            let buf = buf.trim_ascii_start().trim_ascii_end();
-            if buf.len() == 0 {
-                continue;
-            }
-            if let Some(x) = buf.iter().find(|x| !is_nucleic_acid(**x)) {
-                panic!(
-                    "invalid nucleic acid: '{}' (0x{x:0x})",
-                    char::from_u32(*x as u32).unwrap()
-                );
-            }
-
-            cnt += buf.len() as u64;
-        }
-        cnt
-    }
-
     let len = match args.input {
         Some(input) => {
             let input = std::fs::OpenOptions::new().read(true).open(input)?;
             let lines = read_lines_from_file(input)?;
-            count(lines)
+            count_sequence_bases(lines)
         }
         None => {
             let lines = read_lines_from_stdin().filter_map(|x| x.ok());
-            count(lines)
+            count_sequence_bases(lines)
         }
     };
 
     println!("{len}");
 
     Ok(())
+}
+
+fn count_sequence_bases<T: AsRef<[u8]>, I: IntoIterator<Item = T>>(iter: I) -> u64 {
+    let mut count = 0u64;
+    for line in iter {
+        let line = line.as_ref();
+
+        if line.first() == Some(&b'>') {
+            continue;
+        }
+
+        let sequence = line.trim_ascii_start().trim_ascii_end();
+        if sequence.is_empty() {
+            continue;
+        }
+        if let Some(x) = sequence.iter().find(|x| !is_nucleic_acid(**x)) {
+            panic!(
+                "invalid nucleic acid: '{}' (0x{x:0x})",
+                char::from_u32(*x as u32).unwrap()
+            );
+        }
+
+        count += sequence.len() as u64;
+    }
+    count
 }
 
 fn slice(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
@@ -243,6 +242,9 @@ impl<T: std::io::Write> Writer<T> {
             let buf = buf.as_ref();
 
             if let Some(b'>') = buf.first() {
+                if written > 0 && written % *chars_per_line != 0 {
+                    writer.write_all(b"\n")?;
+                }
                 writer.write_all(&*buf)?;
                 continue;
             }
@@ -259,7 +261,7 @@ impl<T: std::io::Write> Writer<T> {
             }
 
             let s = match start.take() {
-                Some(n) if cnt + buf.len() < n => {
+                Some(n) if cnt + buf.len() <= n => {
                     cnt += buf.len();
                     *start = n.into();
                     continue;
@@ -271,7 +273,7 @@ impl<T: std::io::Write> Writer<T> {
                 None => 0,
             };
             let e = match end_inclusive {
-                Some(n) if *n <= cnt + buf.len() => *n - cnt,
+                Some(n) if *n < cnt + buf.len() => *n - cnt,
                 _ => buf.len() - 1,
             };
 
@@ -291,7 +293,7 @@ impl<T: std::io::Write> Writer<T> {
 
             cnt += buf.len();
             if let Some(n) = end_inclusive {
-                if *n <= cnt {
+                if *n < cnt {
                     writer.write_all(b"\n")?;
                     break;
                 }
@@ -299,5 +301,114 @@ impl<T: std::io::Write> Writer<T> {
         }
 
         writer.flush()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{count_sequence_bases, Writer, WriterOptions};
+    use crossbeam::channel::unbounded;
+
+    fn write_fasta(lines: &[&[u8]], options: WriterOptions) -> Vec<u8> {
+        let (tx, rx) = unbounded();
+        for line in lines {
+            tx.send(*line).unwrap();
+        }
+        drop(tx);
+
+        let mut writer = Writer::new(Vec::new(), options);
+        writer.run(rx).unwrap();
+        writer.inner.into_inner().unwrap()
+    }
+
+    fn options(
+        chars_per_line: usize,
+        start: Option<usize>,
+        end_inclusive: Option<usize>,
+    ) -> WriterOptions {
+        WriterOptions {
+            chars_per_line,
+            start,
+            end_inclusive,
+        }
+    }
+
+    #[test]
+    fn len_counts_sequence_lines_and_ignores_headers_and_blank_lines() {
+        let lines: [&[u8]; 5] = [
+            b">record 1\n",
+            b"ACGT\n",
+            b" \t\n",
+            b"NU-\r\n",
+            b">record 2\n",
+        ];
+
+        assert_eq!(count_sequence_bases(lines), 7);
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid nucleic acid")]
+    fn len_rejects_invalid_sequence_symbols() {
+        count_sequence_bases([b"ACX".as_slice()]);
+    }
+
+    #[test]
+    fn slice_wraps_sequence_at_requested_line_width() {
+        let output = write_fasta(&[b">record\n", b"ACGT\n", b"NU\n"], options(3, None, None));
+
+        assert_eq!(output, b">record\nACG\nTNU\n");
+    }
+
+    #[test]
+    fn slice_uses_inclusive_indices_across_sequence_lines() {
+        let output = write_fasta(
+            &[b">record\n", b"ACGT\n", b"NU-\n"],
+            options(2, Some(2), Some(4)),
+        );
+
+        assert_eq!(output, b">record\nGT\nN\n");
+    }
+
+    #[test]
+    fn slice_can_start_at_an_offset_without_an_end() {
+        let output = write_fasta(
+            &[b">record\n", b"ACGT\n", b"NU\n"],
+            options(10, Some(3), None),
+        );
+
+        assert_eq!(output, b">record\nTNU");
+    }
+
+    #[test]
+    fn slice_starting_at_a_line_boundary_uses_the_next_line() {
+        let output = write_fasta(
+            &[b">record\n", b"ACGT\n", b"NU\n"],
+            options(10, Some(4), Some(5)),
+        );
+
+        assert_eq!(output, b">record\nNU\n");
+    }
+
+    #[test]
+    fn slice_stops_at_the_inclusive_end() {
+        let output = write_fasta(&[b">record\n", b"ACGT\n"], options(10, None, Some(2)));
+
+        assert_eq!(output, b">record\nACG\n");
+    }
+
+    #[test]
+    fn slice_separates_headers_from_a_partial_sequence_line() {
+        let output = write_fasta(
+            &[b">first\n", b"AC\n", b">second\n", b"GT\n"],
+            options(10, None, None),
+        );
+
+        assert_eq!(output, b">first\nAC\n>second\nGT");
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid nucleic acid")]
+    fn slice_rejects_invalid_sequence_symbols() {
+        let _ = write_fasta(&[b"ACX\n"], options(10, None, None));
     }
 }

@@ -129,10 +129,10 @@ mod benchs {
     extern crate test;
     use super::NUCLEIC_ACID_SET;
     use rand::Rng;
-    use std::lazy::SyncLazy;
+    use std::sync::LazyLock;
     use test::Bencher;
 
-    static SEQ: SyncLazy<Vec<u8>> = SyncLazy::new(|| {
+    static SEQ: LazyLock<Vec<u8>> = LazyLock::new(|| {
         const SIZE: usize = 10000;
 
         let mut rand = rand::thread_rng();
