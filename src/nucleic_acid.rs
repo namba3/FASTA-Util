@@ -62,7 +62,7 @@ pub const fn is_nucleic_acid_match(x: u8) -> bool {
 
 #[inline]
 pub fn is_nucleic_acid_iter(x: u8) -> bool {
-    NUCLEIC_ACID_SET.iter().find(|e| **e == x).is_some()
+    NUCLEIC_ACID_SET.contains(&x)
 }
 
 #[inline]
