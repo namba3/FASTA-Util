@@ -22,4 +22,11 @@ fn header_and_sequence_length_match_requested_size() {
 
     assert_eq!(header, format!(">TestData {requested_size} random data"));
     assert_eq!(sequence_length, requested_size);
+    assert!(sequence.lines().all(|line| (1..=50).contains(&line.len())));
+    assert!(
+        sequence
+            .bytes()
+            .filter(|byte| !byte.is_ascii_whitespace())
+            .all(|base| b"ACGTNUKSYMWRBDHV".contains(&base))
+    );
 }
