@@ -8,6 +8,7 @@
 
 ## Changes
 
+- Do not add personal information such as real names, usernames, email addresses, or machine-specific absolute paths to repository files. Use repository-relative paths or clearly fake placeholders in examples, and review the final diff for these details before committing.
 - Keep FASTA headers (lines beginning with `>`) distinct from sequence data. Sequence validation currently accepts the uppercase symbols in `src/nucleic_acid.rs`, including `-`; coordinate or alphabet changes should be deliberate and covered by tests.
 - The `slice` range is zero-based and follows Rust range syntax: `a..b` excludes `b`, while `a..=b` includes it. Preserve this behavior unless the requested change explicitly changes it.
 - Keep output streaming for large FASTA files. The main file reader memory-maps input, so review lifetime and safety assumptions carefully when changing `src/lib.rs`.
