@@ -33,9 +33,11 @@ cargo run --manifest-path=generate_random_data/Cargo.toml -- 10000 > test.fna
 ```
 
 同じ乱数シードでデータを再生成するには、`--seed`を指定します。
+`--line-width`で配列行の長さを変更できます。既定値は50です。
 
 ```sh
 cargo run --manifest-path=generate_random_data/Cargo.toml -- 10000 --seed 42 > test.fna
+cargo run --manifest-path=generate_random_data/Cargo.toml -- 10000 --line-width 60 > test.fna
 ```
 
 ## サブコマンド

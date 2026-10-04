@@ -3,12 +3,14 @@ use rand::{rngs::StdRng, RngExt, SeedableRng};
 use std::io::{self, BufWriter, Write};
 
 const DEFAULT_SIZE: usize = 10_000;
-const USAGE: &str = "Usage: generate_random_data [SIZE] [--seed SEED]\n\
+const DEFAULT_LINE_WIDTH: usize = 50;
+const USAGE: &str = "Usage: generate_random_data [SIZE] [--seed SEED] [--line-width WIDTH]\n\
 Generate a FASTA file containing a random nucleotide sequence.\n\
 \n\
 Arguments:\n\
   SIZE       Sequence length in bases (default: 10000; minimum: 1)\n\
-  --seed     Use a reproducible random seed\n\
+  --seed N   Use a reproducible random seed\n\
+  --line-width N  Bases per sequence line (default: 50; minimum: 1)\n\
   -h, --help Print this help message";
 
 fn parse_size_args<I>(args: I) -> Result<usize, io::Error>
@@ -39,23 +41,23 @@ where
     Ok(size.max(1))
 }
 
-fn parse_generator_args<I>(args: I) -> Result<(usize, Option<u64>), io::Error>
+fn parse_generator_args<I>(args: I) -> Result<(usize, Option<u64>, usize), io::Error>
 where
     I: IntoIterator<Item = String>,
 {
     let mut size_args = Vec::new();
     let mut seed = None;
+    let mut line_width = DEFAULT_LINE_WIDTH;
+    let mut line_width_seen = false;
     let mut args = args.into_iter();
 
     while let Some(arg) = args.next() {
-        let seed_value = if arg == "--seed" {
-            Some(args.next().ok_or_else(|| {
+        let seed_value = match arg.as_str() {
+            "--seed" => Some(args.next().ok_or_else(|| {
                 io::Error::new(io::ErrorKind::InvalidInput, "missing value for --seed")
-            })?)
-        } else {
-            arg.strip_prefix("--seed=").map(str::to_owned)
+            })?),
+            _ => arg.strip_prefix("--seed=").map(str::to_owned),
         };
-
         if let Some(value) = seed_value {
             if seed.is_some() {
                 return Err(io::Error::new(
@@ -69,15 +71,47 @@ where
                     format!("invalid seed '{value}': {error}"),
                 )
             })?);
+            continue;
+        }
+
+        let line_width_value = match arg.as_str() {
+            "--line-width" => Some(args.next().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "missing value for --line-width",
+                )
+            })?),
+            _ => arg.strip_prefix("--line-width=").map(str::to_owned),
+        };
+        if let Some(value) = line_width_value {
+            if line_width_seen {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "--line-width may only be specified once",
+                ));
+            }
+            line_width = value.parse::<usize>().map_err(|error| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("invalid line width '{value}': {error}"),
+                )
+            })?;
+            if line_width == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "line width must be greater than zero",
+                ));
+            }
+            line_width_seen = true;
         } else {
             size_args.push(arg);
         }
     }
 
-    Ok((parse_size_args(size_args)?, seed))
+    Ok((parse_size_args(size_args)?, seed, line_width))
 }
 
-fn write_fasta<W, R>(output: &mut W, rng: &mut R, size: usize) -> io::Result<()>
+fn write_fasta<W, R>(output: &mut W, rng: &mut R, size: usize, line_width: usize) -> io::Result<()>
 where
     W: Write,
     R: RngExt,
@@ -86,15 +120,28 @@ where
     writeln!(output, ">TestData {size} random data")?;
 
     let mut remaining = size;
-    let mut line = [0; 50];
+    let mut line = [0; DEFAULT_LINE_WIDTH];
+    let mut bases_on_line = 0;
     while remaining > 0 {
         let line_len = remaining.min(line.len());
         for base in &mut line[..line_len] {
             *base = set[rng.random_range(0..set.len())];
         }
-        output.write_all(&line[..line_len])?;
-        output.write_all(b"\n")?;
+        let mut offset = 0;
+        while offset < line_len {
+            let count = (line_width - bases_on_line).min(line_len - offset);
+            output.write_all(&line[offset..offset + count])?;
+            offset += count;
+            bases_on_line += count;
+            if bases_on_line == line_width {
+                output.write_all(b"\n")?;
+                bases_on_line = 0;
+            }
+        }
         remaining -= line_len;
+    }
+    if bases_on_line > 0 {
+        output.write_all(b"\n")?;
     }
 
     Ok(())
@@ -106,17 +153,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("{USAGE}");
         return Ok(());
     }
-    let (size, seed) = parse_generator_args(args)?;
+    let (size, seed, line_width) = parse_generator_args(args)?;
 
     let stdout = io::stdout();
     let mut output = BufWriter::new(stdout.lock());
 
     if let Some(seed) = seed {
         let mut rng = StdRng::seed_from_u64(seed);
-        write_fasta(&mut output, &mut rng, size)?;
+        write_fasta(&mut output, &mut rng, size, line_width)?;
     } else {
         let mut rng = rand::rng();
-        write_fasta(&mut output, &mut rng, size)?;
+        write_fasta(&mut output, &mut rng, size, line_width)?;
     }
 
     output.flush()?;

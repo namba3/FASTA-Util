@@ -33,9 +33,11 @@ cargo run --manifest-path=generate_random_data/Cargo.toml -- 10000 > test.fna
 ```
 
 Pass `--seed` to reproduce generated data with the same random seed.
+Use `--line-width` to change the number of bases per sequence line. The default is 50.
 
 ```sh
 cargo run --manifest-path=generate_random_data/Cargo.toml -- 10000 --seed 42 > test.fna
+cargo run --manifest-path=generate_random_data/Cargo.toml -- 10000 --line-width 60 > test.fna
 ```
 
 ## Sub Commands
