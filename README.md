@@ -48,6 +48,7 @@ SUDKUGDWWTSSYBUCKYUDSAADMMRHMT
 ## 簡単なテストとベンチマーク
 
 塩基判定方式のベンチマークを実行するには、次のコマンドを使います。
+有効な塩基のみ、無効な文字のみ、有効率50%の混在、有効率99%の混在の4パターンを計測します。
 
 ```sh
 cargo bench --bench nucleic_acid

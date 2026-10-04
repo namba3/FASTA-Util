@@ -9,6 +9,7 @@ use std::{
 const INPUT_SIZE: usize = 10_000;
 const MEASURE_FOR: Duration = Duration::from_secs(1);
 const WARMUP_ROUNDS: usize = 10;
+const INVALID_BASES: &[u8] = b"xyz0123?";
 
 fn count_valid<F>(sequence: &[u8], predicate: F) -> usize
 where
@@ -49,27 +50,60 @@ where
     );
 }
 
-fn main() {
-    let sequence = (0..INPUT_SIZE)
-        .map(|index| NUCLEIC_ACID_SET[index % NUCLEIC_ACID_SET.len()])
-        .collect::<Vec<_>>();
-    let expected_count = count_valid(&sequence, is_nucleic_acid_match);
+fn repeated_bytes(bytes: &[u8]) -> Vec<u8> {
+    (0..INPUT_SIZE)
+        .map(|index| bytes[index % bytes.len()])
+        .collect()
+}
 
+fn mixed_sequence(valid_percent: u32, mut state: u32) -> Vec<u8> {
+    (0..INPUT_SIZE)
+        .map(|_| {
+            // Xorshift32 keeps the generated input deterministic without a dependency.
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+
+            if state % 100 < valid_percent {
+                NUCLEIC_ACID_SET[(state as usize >> 8) % NUCLEIC_ACID_SET.len()]
+            } else {
+                INVALID_BASES[(state as usize >> 8) % INVALID_BASES.len()]
+            }
+        })
+        .collect()
+}
+
+fn main() {
     println!(
-        "Input: {INPUT_SIZE} bases; measuring each implementation for {} second(s)",
+        "Input: {INPUT_SIZE} bytes per pattern; measuring each implementation for {} second(s)",
         MEASURE_FOR.as_secs()
     );
-    benchmark("match", &sequence, expected_count, is_nucleic_acid_match);
-    benchmark(
-        "set iteration",
-        &sequence,
-        expected_count,
-        is_nucleic_acid_iter,
-    );
-    benchmark(
-        "lookup table",
-        &sequence,
-        expected_count,
-        is_nucleic_acid_lut,
-    );
+
+    let cases = [
+        ("all valid", repeated_bytes(NUCLEIC_ACID_SET)),
+        ("all invalid", repeated_bytes(INVALID_BASES)),
+        ("mixed 50% valid", mixed_sequence(50, 0x9e37_79b9)),
+        ("mostly valid (99%)", mixed_sequence(99, 0x243f_6a88)),
+    ];
+
+    for (case_name, sequence) in cases {
+        let expected_count = sequence
+            .iter()
+            .filter(|&&base| NUCLEIC_ACID_SET.contains(&base))
+            .count();
+        println!("\n{case_name}:");
+        benchmark("match", &sequence, expected_count, is_nucleic_acid_match);
+        benchmark(
+            "set iteration",
+            &sequence,
+            expected_count,
+            is_nucleic_acid_iter,
+        );
+        benchmark(
+            "lookup table",
+            &sequence,
+            expected_count,
+            is_nucleic_acid_lut,
+        );
+    }
 }
