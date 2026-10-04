@@ -66,6 +66,54 @@ fn indexed_fasta_fixture() -> (TemporaryFile, TemporaryFile) {
     )
 }
 
+fn indexed_fasta_with_layout(
+    records: &[(&str, &[u8], usize)],
+    line_ending: &[u8],
+) -> (TemporaryFile, TemporaryFile) {
+    let mut fasta = Vec::new();
+    let mut fai = String::new();
+
+    for (record_index, (name, sequence, requested_line_bases)) in records.iter().enumerate() {
+        fasta.extend_from_slice(b">");
+        fasta.extend_from_slice(name.as_bytes());
+        fasta.extend_from_slice(b" generated record");
+        fasta.extend_from_slice(line_ending);
+
+        let sequence_offset = fasta.len();
+        let line_bases = if sequence.is_empty() {
+            0
+        } else {
+            (*requested_line_bases).min(sequence.len())
+        };
+        let line_width = if sequence.is_empty() {
+            0
+        } else {
+            line_bases + line_ending.len()
+        };
+        if line_bases > 0 {
+            let chunks = sequence.chunks(line_bases).collect::<Vec<_>>();
+            for (chunk_index, chunk) in chunks.iter().enumerate() {
+                fasta.extend_from_slice(chunk);
+                let is_final_chunk_of_final_record =
+                    record_index + 1 == records.len() && chunk_index + 1 == chunks.len();
+                if !is_final_chunk_of_final_record {
+                    fasta.extend_from_slice(line_ending);
+                }
+            }
+        }
+
+        fai.push_str(&format!(
+            "{name}\t{}\t{sequence_offset}\t{line_bases}\t{line_width}\n",
+            sequence.len()
+        ));
+    }
+
+    (
+        TemporaryFile::new(&fasta),
+        TemporaryFile::new(fai.as_bytes()),
+    )
+}
+
 fn run_fasta_util(args: &[&str], input: &[u8]) -> Output {
     run_fasta_util_with(input, |command| {
         command.args(args);
@@ -241,6 +289,58 @@ fn indexed_slice_matches_streaming_slice_for_wrapped_multi_record_fasta() {
             "range {range}: {:?}",
             indexed.stderr
         );
+    }
+}
+
+#[test]
+fn indexed_slice_matches_streaming_across_record_layouts_and_line_endings() {
+    let records = [
+        ("empty", b"".as_slice(), 4),
+        ("single", b"a".as_slice(), 4),
+        ("short", b"ACGT".as_slice(), 2),
+        ("odd", b"tgcaN".as_slice(), 3),
+        ("long", b"ACGTagctN-".as_slice(), 4),
+        ("last", b"u".as_slice(), 1),
+    ];
+    let ranges = ["..", "0..=0", "1..=4", "3..=9", "8..=17", "20.."];
+    let line_widths = ["1", "3", "8"];
+
+    for line_ending in [b"\n".as_slice(), b"\r\n".as_slice()] {
+        let (input, index) = indexed_fasta_with_layout(&records, line_ending);
+        for range in ranges {
+            for line_width in line_widths {
+                let normal = run_fasta_util(
+                    &[
+                        "slice",
+                        "--input",
+                        input.path(),
+                        "--range",
+                        range,
+                        "--chars-per-line",
+                        line_width,
+                    ],
+                    b"",
+                );
+                let indexed = run_fasta_util(
+                    &[
+                        "slice",
+                        "--input",
+                        input.path(),
+                        "--fai-index",
+                        index.path(),
+                        "--range",
+                        range,
+                        "--chars-per-line",
+                        line_width,
+                    ],
+                    b"",
+                );
+
+                assert!(normal.status.success(), "normal {range}: {normal:?}");
+                assert!(indexed.status.success(), "indexed {range}: {indexed:?}");
+                assert_eq!(indexed.stdout, normal.stdout, "{range}, width {line_width}");
+            }
+        }
     }
 }
 
