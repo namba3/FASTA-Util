@@ -120,7 +120,7 @@ struct LenArgs {
         long,
         help = "Specify input file\nIf omitted, read from standard input"
     )]
-    input: Option<String>,
+    input: Option<PathBuf>,
 }
 
 #[derive(Parser)]
@@ -130,14 +130,14 @@ struct SliceArgs {
         long,
         help = "Specify input file\nIf omitted, read from standard input"
     )]
-    input: Option<String>,
+    input: Option<PathBuf>,
 
     #[arg(
         short,
         long,
         help = "Specify output file\nIf omitted, write to standard output"
     )]
-    output: Option<String>,
+    output: Option<PathBuf>,
 
     #[arg(
         long,
@@ -256,10 +256,7 @@ fn invalid_range(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message.into())
 }
 
-fn ensure_distinct_input_output(input: &str, output: &str) -> io::Result<()> {
-    let input_path = std::path::Path::new(input);
-    let output_path = std::path::Path::new(output);
-
+fn ensure_distinct_input_output(input_path: &Path, output_path: &Path) -> io::Result<()> {
     let _output_metadata = match std::fs::metadata(output_path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
@@ -347,7 +344,7 @@ fn slice(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
     let mut temporary_output = args
         .output
         .as_deref()
-        .map(|path| TemporaryOutput::create(Path::new(path)))
+        .map(TemporaryOutput::create)
         .transpose()?;
     let output: Box<dyn Write> = match temporary_output.as_mut() {
         Some(temporary_output) => Box::new(temporary_output.take_file()?),

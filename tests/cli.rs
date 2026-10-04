@@ -48,8 +48,15 @@ impl Drop for TemporaryFile {
 }
 
 fn run_fasta_util(args: &[&str], input: &[u8]) -> Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_fasta-util"))
-        .args(args)
+    run_fasta_util_with(input, |command| {
+        command.args(args);
+    })
+}
+
+fn run_fasta_util_with(input: &[u8], configure: impl FnOnce(&mut Command)) -> Output {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_fasta-util"));
+    configure(&mut command);
+    let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -65,6 +72,27 @@ fn run_fasta_util(args: &[&str], input: &[u8]) -> Output {
     drop(child.stdin.take());
 
     child.wait_with_output().expect("failed to collect output")
+}
+
+#[cfg(unix)]
+fn temporary_non_utf8_file(contents: &[u8]) -> TemporaryFile {
+    use std::os::unix::ffi::OsStringExt;
+
+    loop {
+        let id = NEXT_TEMP_FILE_ID.fetch_add(1, Ordering::Relaxed);
+        let mut name = format!("fasta-util-cli-{}-{id}-", std::process::id()).into_bytes();
+        name.push(0xff);
+        name.extend_from_slice(b".tmp");
+        let path = std::env::temp_dir().join(std::ffi::OsString::from_vec(name));
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(mut file) => {
+                file.write_all(contents).unwrap();
+                return TemporaryFile(path);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => panic!("failed to create non-UTF-8 temporary file: {error}"),
+        }
+    }
 }
 
 #[test]
@@ -83,6 +111,19 @@ fn len_counts_sequence_symbols_from_a_multi_record_file() {
 
     assert!(output.status.success());
     assert_eq!(output.stdout, b"7\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn len_accepts_a_non_utf8_input_path() {
+    let input = temporary_non_utf8_file(b">record\nACGT\n");
+    let output = run_fasta_util_with(b"", |command| {
+        command.arg("len").arg("--input").arg(&input.0);
+    });
+
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"4\n");
     assert!(output.stderr.is_empty());
 }
 
@@ -117,6 +158,26 @@ fn slice_reads_a_crlf_file_and_writes_normalized_fasta_to_a_file() {
     assert!(output.stdout.is_empty());
     assert!(output.stderr.is_empty());
     assert_eq!(output_file.read(), b">first\nACGT\n>second\nNU-");
+}
+
+#[cfg(unix)]
+#[test]
+fn slice_accepts_a_non_utf8_output_path() {
+    let input = TemporaryFile::new(b">record\nACGT\n");
+    let output_file = temporary_non_utf8_file(b"old contents");
+    let output = run_fasta_util_with(b"", |command| {
+        command
+            .arg("slice")
+            .arg("--input")
+            .arg(&input.0)
+            .arg("--output")
+            .arg(&output_file.0);
+    });
+
+    assert!(output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(output.stderr.is_empty());
+    assert_eq!(output_file.read(), b">record\nACGT");
 }
 
 #[test]
