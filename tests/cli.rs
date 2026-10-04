@@ -564,7 +564,7 @@ fn indexed_slice_rejects_malformed_and_out_of_bounds_indexes() {
 #[test]
 fn indexed_slice_requires_a_file_input() {
     let index = TemporaryFile::new(b"record\t4\t7\t4\t4\n");
-    let output = run_fasta_util(&["slice", "--fai-index", index.path()], b">record\nACGT\n");
+    let output = run_fasta_util(&["slice", "--fai-index", index.path()], b"");
 
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("--fai-index requires --input"));
