@@ -6,6 +6,7 @@ use std::{
 };
 
 const COPY_BUFFER_SIZE: usize = 64 * 1024;
+const HEADER_SCAN_BUFFER_SIZE: u64 = 4 * 1024;
 
 struct FaiRecord {
     name: Vec<u8>,
@@ -204,7 +205,7 @@ fn read_header(file: &mut File, sequence_offset: u64, expected_name: &[u8]) -> i
     let mut search_end = header_end;
     let mut header_start = 0u64;
     while search_end > 0 {
-        let block_start = search_end.saturating_sub(COPY_BUFFER_SIZE as u64);
+        let block_start = search_end.saturating_sub(HEADER_SCAN_BUFFER_SIZE);
         let block_length = usize::try_from(search_end - block_start)
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "FASTA header is too long"))?;
         let mut block = vec![0; block_length];

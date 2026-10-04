@@ -245,6 +245,40 @@ fn indexed_slice_matches_streaming_slice_for_wrapped_multi_record_fasta() {
 }
 
 #[test]
+fn indexed_slice_reads_headers_longer_than_the_header_scan_buffer() {
+    let first_header = b">previous\n";
+    let second_name = "longname".repeat(800);
+    let second_header = format!(">{second_name} long description\n");
+    let first_offset = first_header.len();
+    let second_offset = first_offset + 5 + second_header.len();
+    let mut fasta = first_header.to_vec();
+    fasta.extend_from_slice(b"ACGT\n");
+    fasta.extend_from_slice(second_header.as_bytes());
+    fasta.extend_from_slice(b"TT\n");
+    let input = TemporaryFile::new(&fasta);
+    let index = TemporaryFile::new(
+        format!("previous\t4\t{first_offset}\t4\t5\n{second_name}\t2\t{second_offset}\t2\t3\n")
+            .as_bytes(),
+    );
+
+    let normal = run_fasta_util(&["slice", "--input", input.path()], b"");
+    let indexed = run_fasta_util(
+        &[
+            "slice",
+            "--input",
+            input.path(),
+            "--fai-index",
+            index.path(),
+        ],
+        b"",
+    );
+
+    assert!(normal.status.success(), "{:?}", normal.stderr);
+    assert!(indexed.status.success(), "{:?}", indexed.stderr);
+    assert_eq!(indexed.stdout, normal.stdout);
+}
+
+#[test]
 fn indexed_slice_matches_streaming_slice_across_read_buffer_chunks() {
     let mut fasta = b">long\n".to_vec();
     let sequence = (0..150_123)
