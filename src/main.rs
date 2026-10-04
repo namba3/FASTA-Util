@@ -1,7 +1,9 @@
 use clap::{Parser, Subcommand};
-use crossbeam::channel::{Receiver, unbounded};
+use crossbeam::channel::{Receiver, bounded};
 use fasta_util::{is_nucleic_acid, read_lines_from_file, read_lines_from_stdin};
 use std::io::{self, BufWriter, Write};
+
+const LINE_CHANNEL_CAPACITY: usize = 32;
 
 #[derive(Parser)]
 #[command(author, version, about)]
@@ -206,7 +208,7 @@ fn slice(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
     let (hndl, write_result) = match args.input {
         Some(input) => {
             let input = std::fs::OpenOptions::new().read(true).open(input)?;
-            let (tx, rx) = unbounded();
+            let (tx, rx) = bounded(LINE_CHANNEL_CAPACITY);
             let hndl = std::thread::spawn(move || -> Result<(), std::io::Error> {
                 let mut lines = read_lines_from_file(input)?;
                 while let Some(line) = lines.next() {
@@ -221,7 +223,7 @@ fn slice(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
             (hndl, write_result)
         }
         None => {
-            let (tx, rx) = unbounded();
+            let (tx, rx) = bounded(LINE_CHANNEL_CAPACITY);
             let hndl = std::thread::spawn(move || -> Result<(), std::io::Error> {
                 let mut lines = read_lines_from_stdin();
                 while let Some(line) = lines.next() {
