@@ -9,7 +9,7 @@ Generate a FASTA file containing a random nucleotide sequence.\n\
 \n\
 Arguments:\n\
   SIZE       Sequence length in bases (default: 10000; minimum: 1)\n\
-  --seed N   Use a reproducible random seed\n\
+  --seed N   Reproduce output with the same rand version and platform\n\
   --line-width N  Bases per sequence line (default: 50; minimum: 1)\n\
   -h, --help Print this help message";
 
