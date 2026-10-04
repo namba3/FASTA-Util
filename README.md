@@ -7,13 +7,13 @@ FASTA ファイルを扱うための CLI ツールです。
 ## ビルド
 
 ```sh
-cargo +nightly build --release
+cargo build --release
 ```
 
 ## テストデータの生成
 
 ```sh
-cargo +nightly run --manifest-path=generate_random_data/Cargo.toml -- 10000 > test.fna
+cargo run --manifest-path=generate_random_data/Cargo.toml -- 10000 > test.fna
 ```
 
 ## サブコマンド

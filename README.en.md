@@ -7,13 +7,13 @@ A CLI tool for playing with FASTA files
 ## Build
 
 ```sh
-cargo +nightly build --release
+cargo build --release
 ```
 
 ## Generate Test Data
 
 ```sh
-cargo +nightly run --manifest-path=generate_random_data/Cargo.toml -- 10000 > test.fna
+cargo run --manifest-path=generate_random_data/Cargo.toml -- 10000 > test.fna
 ```
 
 ## Sub Commands

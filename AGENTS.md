@@ -3,7 +3,7 @@
 ## Project
 
 - This repository contains the `fasta-util` Rust CLI and the separate `generate_random_data` helper crate.
-- The main crate uses nightly-only Rust features. Use the nightly toolchain for Cargo commands.
+- Normal builds use stable Rust. Unit tests and built-in benchmarks use the nightly-only `test` feature; use nightly for those commands.
 - Read `README.md` for the user-facing commands and examples before changing CLI behavior.
 
 ## Changes
@@ -18,10 +18,10 @@
 ## Useful commands
 
 ```sh
-cargo +nightly fmt --check
+cargo fmt --check
+cargo build --release
 cargo +nightly test
-cargo +nightly build --release
-cargo +nightly run --manifest-path=generate_random_data/Cargo.toml -- 10000
+cargo run --manifest-path=generate_random_data/Cargo.toml -- 10000
 ```
 
 The root crate contains nightly benchmark code; run benchmarks with `cargo +nightly bench` when performance work requires it. Do not treat benchmark timings as stable across machines or runs.

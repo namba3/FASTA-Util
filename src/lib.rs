@@ -1,5 +1,4 @@
 #![cfg_attr(test, feature(test))]
-#![feature(slice_from_ptr_range)]
 
 pub mod amino_acid;
 pub mod nucleic_acid;
@@ -45,10 +44,15 @@ impl Iterator for LinesInFile {
 
         if let Some(line) = line {
             self.head += line.len();
-            let range = line.as_ptr_range();
+            let slice = unsafe {
+                // SAFETY: `line` is a subslice of the read-only mapping. Its pointer and length
+                // describe initialized bytes in that mapping, and the cloned Arc below keeps the
+                // mapping alive for as long as this slice can be accessed through `LineInFile`.
+                slice::from_raw_parts::<'static, _>(line.as_ptr(), line.len())
+            };
             LineInFile {
                 _mmap: Arc::clone(&self.mmap),
-                slice: unsafe { slice::from_ptr_range::<'static, _>(range) },
+                slice,
             }
             .into()
         } else {
@@ -110,6 +114,14 @@ mod tests {
         }
     }
 
+    fn collect_lines(contents: &[u8]) -> Vec<Vec<u8>> {
+        let input = TemporaryInput::new(contents);
+        read_lines_from_file(input.open())
+            .unwrap()
+            .map(|line| line.as_ref().to_vec())
+            .collect()
+    }
+
     impl Drop for TemporaryInput {
         fn drop(&mut self) {
             let _ = fs::remove_file(&self.0);
@@ -118,12 +130,7 @@ mod tests {
 
     #[test]
     fn reads_each_line_including_its_newline() {
-        let input = TemporaryInput::new(b">record\nACGT\nsecond line");
-        let lines = read_lines_from_file(input.open())
-            .unwrap()
-            .map(|line| line.as_ref().to_vec())
-            .collect::<Vec<_>>();
-
+        let lines = collect_lines(b">record\nACGT\nsecond line");
         assert_eq!(
             lines,
             [
@@ -136,20 +143,47 @@ mod tests {
 
     #[test]
     fn does_not_yield_an_extra_line_after_a_trailing_newline() {
-        let input = TemporaryInput::new(b"first\nsecond\n");
-        let lines = read_lines_from_file(input.open())
-            .unwrap()
-            .map(|line| line.as_ref().to_vec())
-            .collect::<Vec<_>>();
-
+        let lines = collect_lines(b"first\nsecond\n");
         assert_eq!(lines, [b"first\n".to_vec(), b"second\n".to_vec()]);
     }
 
     #[test]
     fn empty_file_has_no_lines() {
-        let input = TemporaryInput::new(b"");
+        assert!(collect_lines(b"").is_empty());
+    }
 
-        assert_eq!(read_lines_from_file(input.open()).unwrap().count(), 0);
+    #[test]
+    fn preserves_empty_lines_crlf_and_a_final_line_without_newline() {
+        let lines = collect_lines(b"\nfirst\r\n\nlast");
+
+        assert_eq!(
+            lines,
+            [
+                b"\n".to_vec(),
+                b"first\r\n".to_vec(),
+                b"\n".to_vec(),
+                b"last".to_vec()
+            ]
+        );
+    }
+
+    #[test]
+    fn preserves_every_byte_when_reassembling_lines() {
+        let contents = (0..=u8::MAX).collect::<Vec<_>>();
+        let lines = collect_lines(&contents);
+        let reassembled = lines.into_iter().flatten().collect::<Vec<_>>();
+
+        assert_eq!(reassembled, contents);
+    }
+
+    #[test]
+    fn iterator_stays_exhausted_after_the_last_line() {
+        let input = TemporaryInput::new(b"one line");
+        let mut lines = read_lines_from_file(input.open()).unwrap();
+
+        assert_eq!(lines.next().unwrap().as_ref(), b"one line");
+        assert!(lines.next().is_none());
+        assert!(lines.next().is_none());
     }
 
     #[test]
@@ -158,9 +192,9 @@ mod tests {
         let mut lines = read_lines_from_file(input.open()).unwrap();
         let line = lines.next().unwrap();
         let clone = line.clone();
+        drop(line);
         drop(lines);
 
-        assert_eq!(line.as_ref(), b"mapped line\n");
         assert_eq!(clone.as_ref(), b"mapped line\n");
     }
 }
