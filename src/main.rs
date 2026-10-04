@@ -157,6 +157,36 @@ fn invalid_range(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message.into())
 }
 
+fn ensure_distinct_input_output(input: &str, output: &str) -> io::Result<()> {
+    let input_path = std::path::Path::new(input);
+    let output_path = std::path::Path::new(output);
+
+    let _output_metadata = match std::fs::metadata(output_path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+
+    let same_file = std::fs::canonicalize(input_path)? == std::fs::canonicalize(output_path)?;
+    #[cfg(unix)]
+    let same_file = {
+        use std::os::unix::fs::MetadataExt;
+        let input_metadata = std::fs::metadata(input_path)?;
+        same_file
+            || (input_metadata.dev() == _output_metadata.dev()
+                && input_metadata.ino() == _output_metadata.ino())
+    };
+
+    if same_file {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "input and output refer to the same file",
+        ));
+    }
+
+    Ok(())
+}
+
 fn parse_slice_range(range: &str) -> Result<SequenceRange, io::Error> {
     let parse_index = |value: &str| {
         value
@@ -196,6 +226,10 @@ fn parse_slice_range(range: &str) -> Result<SequenceRange, io::Error> {
 }
 
 fn slice(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
+    if let (Some(input), Some(output)) = (&args.input, &args.output) {
+        ensure_distinct_input_output(input, output)?;
+    }
+
     let range = parse_slice_range(&args.range)?;
     let writer_options = WriterOptions {
         chars_per_line: args.chars_per_line,
