@@ -1,3 +1,4 @@
+mod fasta_index;
 mod output;
 
 use clap::{Parser, Subcommand};
@@ -51,6 +52,12 @@ struct SliceArgs {
         help = "Specify output file\nIf omitted, write to standard output"
     )]
     output: Option<PathBuf>,
+
+    #[arg(
+        long,
+        help = "Use a matching FASTA .fai index to read only the selected sequence region"
+    )]
+    fai_index: Option<PathBuf>,
 
     #[arg(
         long,
@@ -244,11 +251,41 @@ fn parse_slice_range(range: &str) -> Result<SequenceRange, io::Error> {
 }
 
 fn slice(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
+    if args.fai_index.is_some() && args.input.is_none() {
+        return Err(invalid_range("--fai-index requires --input").into());
+    }
     if let (Some(input), Some(output)) = (&args.input, &args.output) {
         ensure_distinct_input_output(input, output)?;
     }
 
     let range = parse_slice_range(&args.range)?;
+    if let (Some(index_path), Some(input_path)) = (&args.fai_index, &args.input) {
+        let mut temporary_output = args
+            .output
+            .as_deref()
+            .map(TemporaryOutput::create)
+            .transpose()?;
+        let output: Box<dyn Write> = match temporary_output.as_mut() {
+            Some(temporary_output) => Box::new(temporary_output.take_file()?),
+            None => Box::new(std::io::stdout().lock()),
+        };
+        let mut writer = BufWriter::new(output);
+        fasta_index::write_slice(
+            input_path,
+            index_path,
+            range.start,
+            range.end_exclusive,
+            args.chars_per_line,
+            &mut writer,
+        )?;
+        writer.flush()?;
+        drop(writer);
+        if let Some(temporary_output) = &mut temporary_output {
+            temporary_output.commit()?;
+        }
+        return Ok(());
+    }
+
     let writer_options = WriterOptions {
         chars_per_line: args.chars_per_line,
         start: range.start,

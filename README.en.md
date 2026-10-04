@@ -60,8 +60,12 @@ Cut out a part of the sequence
 
 When `-o`/`--output` specifies a file, the destination is replaced only after processing succeeds. The input file cannot also be used as the output file.
 
+For a slice from the middle of a large uncompressed FASTA, pass a matching `.fai` index with `--fai-index` to read the selected region directly. Create the index with `samtools faidx`. Rebuild it whenever the FASTA changes. This path validates the sequence symbols in the selected region.
+
 ```sh
 ./target/release/fasta-util slice -i test.fna --range 99..=199
+samtools faidx test.fna
+./target/release/fasta-util slice -i test.fna --fai-index test.fna.fai --range 100000000..100000100
 ```
 
 ```txt

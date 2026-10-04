@@ -47,6 +47,25 @@ impl Drop for TemporaryFile {
     }
 }
 
+fn indexed_fasta_fixture() -> (TemporaryFile, TemporaryFile) {
+    let fasta = b">empty record\r\n>first description\r\nACGT\r\nACGT\r\n>second record\r\nacgt\r\n>third\r\nTT";
+    let first_header = b">empty record\r\n";
+    let second_header = b">first description\r\n";
+    let third_header = b">second record\r\n";
+    let fourth_header = b">third\r\n";
+    let empty_offset = first_header.len();
+    let first_offset = empty_offset + second_header.len();
+    let second_offset = first_offset + 2 * 6 + third_header.len();
+    let third_offset = second_offset + 6 + fourth_header.len();
+    let fai = format!(
+        "empty\t0\t{empty_offset}\t0\t0\nfirst\t8\t{first_offset}\t4\t6\nsecond\t4\t{second_offset}\t4\t6\nthird\t2\t{third_offset}\t2\t2\n"
+    );
+    (
+        TemporaryFile::new(fasta),
+        TemporaryFile::new(fai.as_bytes()),
+    )
+}
+
 fn run_fasta_util(args: &[&str], input: &[u8]) -> Output {
     run_fasta_util_with(input, |command| {
         command.args(args);
@@ -168,6 +187,191 @@ fn slice_reads_a_crlf_file_and_writes_normalized_fasta_to_a_file() {
     assert!(output.stdout.is_empty());
     assert!(output.stderr.is_empty());
     assert_eq!(output_file.read(), b">first\nACGT\n>second\nNU-");
+}
+
+#[test]
+fn indexed_slice_matches_streaming_slice_for_wrapped_multi_record_fasta() {
+    let (input, index) = indexed_fasta_fixture();
+    let cases = [
+        ("..", "2"),
+        ("0..0", "4"),
+        ("3..=9", "4"),
+        ("8..=8", "3"),
+        ("10..14", "5"),
+        ("14..", "4"),
+        ("99..", "4"),
+    ];
+
+    for (range, chars_per_line) in cases {
+        let normal = run_fasta_util(
+            &[
+                "slice",
+                "--input",
+                input.path(),
+                "--range",
+                range,
+                "--chars-per-line",
+                chars_per_line,
+            ],
+            b"",
+        );
+        let indexed = run_fasta_util(
+            &[
+                "slice",
+                "--input",
+                input.path(),
+                "--fai-index",
+                index.path(),
+                "--range",
+                range,
+                "--chars-per-line",
+                chars_per_line,
+            ],
+            b"",
+        );
+
+        assert!(normal.status.success(), "normal range {range}: {normal:?}");
+        assert!(
+            indexed.status.success(),
+            "indexed range {range}: {indexed:?}"
+        );
+        assert_eq!(indexed.stdout, normal.stdout, "range {range}");
+        assert!(
+            indexed.stderr.is_empty(),
+            "range {range}: {:?}",
+            indexed.stderr
+        );
+    }
+}
+
+#[test]
+fn indexed_slice_matches_streaming_slice_across_read_buffer_chunks() {
+    let mut fasta = b">long\n".to_vec();
+    let sequence = (0..150_123)
+        .map(|index| b"ACGTacgt"[index % 8])
+        .collect::<Vec<_>>();
+    for line in sequence.chunks(60) {
+        fasta.extend_from_slice(line);
+        if line.len() == 60 {
+            fasta.push(b'\n');
+        }
+    }
+    let input = TemporaryFile::new(&fasta);
+    let index = TemporaryFile::new(b"long\t150123\t6\t60\t61\n");
+    let cases = [("57..70031", "73"), ("65510..=140007", "61")];
+
+    for (range, chars_per_line) in cases {
+        let normal = run_fasta_util(
+            &[
+                "slice",
+                "--input",
+                input.path(),
+                "--range",
+                range,
+                "--chars-per-line",
+                chars_per_line,
+            ],
+            b"",
+        );
+        let indexed = run_fasta_util(
+            &[
+                "slice",
+                "--input",
+                input.path(),
+                "--fai-index",
+                index.path(),
+                "--range",
+                range,
+                "--chars-per-line",
+                chars_per_line,
+            ],
+            b"",
+        );
+
+        assert!(normal.status.success(), "normal range {range}: {normal:?}");
+        assert!(
+            indexed.status.success(),
+            "indexed range {range}: {indexed:?}"
+        );
+        assert_eq!(indexed.stdout, normal.stdout, "range {range}");
+    }
+}
+
+#[test]
+fn indexed_slice_validates_only_selected_sequence_bases() {
+    let input = TemporaryFile::new(b">record description\nACXT\n");
+    let index = TemporaryFile::new(b"record\t4\t20\t4\t5\n");
+    let output = run_fasta_util(
+        &[
+            "slice",
+            "--input",
+            input.path(),
+            "--fai-index",
+            index.path(),
+            "--range",
+            "0..2",
+        ],
+        b"",
+    );
+
+    assert!(output.status.success(), "{:?}", output.stderr);
+    assert_eq!(output.stdout, b">record description\nAC\n");
+}
+
+#[test]
+fn indexed_slice_rejects_mismatched_index_without_replacing_output() {
+    let (input, _) = indexed_fasta_fixture();
+    let index = TemporaryFile::new(b"wrong-name\t8\t35\t4\t6\n");
+    let output_file = TemporaryFile::new(b"keep this output");
+    let output = run_fasta_util(
+        &[
+            "slice",
+            "--input",
+            input.path(),
+            "--fai-index",
+            index.path(),
+            "--output",
+            output_file.path(),
+        ],
+        b"",
+    );
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("FAI record name"));
+    assert_eq!(output_file.read(), b"keep this output");
+}
+
+#[test]
+fn indexed_slice_rejects_malformed_and_out_of_bounds_indexes() {
+    let (input, _) = indexed_fasta_fixture();
+    for contents in [
+        &b"record\tlength\t0\t4\t4\n"[..],
+        &b"record\t4\t999999\t4\t4\n"[..],
+        &b"record\t4\t12\t0\t0\n"[..],
+    ] {
+        let index = TemporaryFile::new(contents);
+        let output = run_fasta_util(
+            &[
+                "slice",
+                "--input",
+                input.path(),
+                "--fai-index",
+                index.path(),
+            ],
+            b"",
+        );
+        assert!(!output.status.success(), "index {contents:?} was accepted");
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("panicked"));
+    }
+}
+
+#[test]
+fn indexed_slice_requires_a_file_input() {
+    let index = TemporaryFile::new(b"record\t4\t7\t4\t4\n");
+    let output = run_fasta_util(&["slice", "--fai-index", index.path()], b">record\nACGT\n");
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("--fai-index requires --input"));
 }
 
 #[cfg(unix)]

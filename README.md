@@ -60,8 +60,12 @@ cargo run --manifest-path=generate_random_data/Cargo.toml -- 10000 --line-width 
 
 `-o`/`--output`で出力ファイルを指定すると、処理が成功した場合にだけ出力先を置き換えます。入力ファイルと同じファイルは出力先に指定できません。
 
+大きな非圧縮FASTAの中ほどから切り出す場合は、対応する`.fai`インデックスを作成して`--fai-index`に渡すと、選択範囲を直接読み込めます。インデックス作成には`samtools faidx`を使えます。FASTAを変更した場合はインデックスを作り直してください。この経路では選択範囲の配列記号を検証します。
+
 ```sh
 ./target/release/fasta-util slice -i test.fna --range 99..=199
+samtools faidx test.fna
+./target/release/fasta-util slice -i test.fna --fai-index test.fna.fai --range 100000000..100000100
 ```
 
 ```txt
