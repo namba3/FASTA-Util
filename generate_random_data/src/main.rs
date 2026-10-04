@@ -19,7 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         v.push(set[idx]);
     }
 
-    println!(">TestData 10000 random data");
+    println!(">TestData {size} random data");
     for line in v.chunks(50) {
         let line = String::from_utf8_lossy(line);
         println!("{line}");
