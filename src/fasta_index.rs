@@ -88,18 +88,31 @@ fn read_index(path: &Path) -> io::Result<Vec<FaiRecord>> {
             return Err(invalid_index_line(line_number, "empty index row"));
         }
 
-        let fields = line.split(|byte| *byte == b'\t').collect::<Vec<_>>();
-        if fields.len() < 5 || fields[0].is_empty() {
+        let mut fields = line.split(|byte| *byte == b'\t');
+        let (Some(name), Some(length), Some(sequence_offset), Some(line_bases), Some(line_width)) = (
+            fields.next(),
+            fields.next(),
+            fields.next(),
+            fields.next(),
+            fields.next(),
+        ) else {
+            return Err(invalid_index_line(
+                line_number,
+                "expected at least five tab-separated fields",
+            ));
+        };
+        if name.is_empty() {
             return Err(invalid_index_line(
                 line_number,
                 "expected at least five tab-separated fields",
             ));
         }
 
-        let length = parse_index_number::<usize>(fields[1], line_number, "sequence length")?;
-        let sequence_offset = parse_index_number::<u64>(fields[2], line_number, "sequence offset")?;
-        let line_bases = parse_index_number::<usize>(fields[3], line_number, "line bases")?;
-        let line_width = parse_index_number::<usize>(fields[4], line_number, "line width")?;
+        let length = parse_index_number::<usize>(length, line_number, "sequence length")?;
+        let sequence_offset =
+            parse_index_number::<u64>(sequence_offset, line_number, "sequence offset")?;
+        let line_bases = parse_index_number::<usize>(line_bases, line_number, "line bases")?;
+        let line_width = parse_index_number::<usize>(line_width, line_number, "line width")?;
         if length > 0 {
             let line_ending_width = line_width.saturating_sub(line_bases);
             let has_invalid_line_ending =
@@ -113,7 +126,7 @@ fn read_index(path: &Path) -> io::Result<Vec<FaiRecord>> {
         }
 
         records.push(FaiRecord {
-            name: fields[0].to_vec(),
+            name: name.to_vec(),
             length,
             sequence_offset,
             line_bases,

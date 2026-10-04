@@ -439,6 +439,8 @@ fn indexed_slice_rejects_linked_index_outputs_without_changing_the_index() {
 fn indexed_slice_rejects_malformed_and_out_of_bounds_indexes() {
     let (input, _) = indexed_fasta_fixture();
     for contents in [
+        &b"record\t4\t7\t4\n"[..],
+        &b"\t4\t7\t4\t4\n"[..],
         &b"record\tlength\t0\t4\t4\n"[..],
         &b"record\t4\t999999\t4\t4\n"[..],
         &b"record\t4\t12\t0\t0\n"[..],
