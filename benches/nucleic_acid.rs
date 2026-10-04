@@ -77,43 +77,86 @@ where
         .count()
 }
 
-fn benchmark<F>(
-    name: &str,
+fn measure_sample<F>(
     sequence: &[u8],
     expected_count: usize,
     sample_duration: Duration,
     predicate: F,
-) where
-    F: Fn(u8) -> bool,
+) -> f64
+where
+    F: Fn(u8) -> bool + Copy,
 {
+    let started = Instant::now();
+    let mut rounds = 0u64;
+    let mut result = 0;
+    while started.elapsed() < sample_duration {
+        result = black_box(count_valid(black_box(sequence), predicate));
+        rounds += 1;
+    }
+    let elapsed = started.elapsed();
+
+    assert_eq!(result, expected_count, "benchmark result differs");
+
+    let bases_processed = rounds as f64 * sequence.len() as f64;
+    elapsed.as_nanos() as f64 / bases_processed
+}
+
+fn benchmark_case(
+    case_name: &str,
+    sequence: &[u8],
+    expected_count: usize,
+    sample_duration: Duration,
+) {
     for _ in 0..WARMUP_ROUNDS {
-        black_box(count_valid(black_box(sequence), &predicate));
+        black_box(count_valid(black_box(sequence), is_nucleic_acid_match));
+        black_box(count_valid(black_box(sequence), is_nucleic_acid_iter));
+        black_box(count_valid(black_box(sequence), is_nucleic_acid_lut));
     }
 
-    let mut samples = Vec::with_capacity(SAMPLE_COUNT);
-    for _ in 0..SAMPLE_COUNT {
-        let started = Instant::now();
-        let mut rounds = 0u64;
-        let mut result = 0;
-        while started.elapsed() < sample_duration {
-            result = black_box(count_valid(black_box(sequence), &predicate));
-            rounds += 1;
+    let mut samples: [Vec<f64>; 3] = std::array::from_fn(|_| Vec::with_capacity(SAMPLE_COUNT));
+    for sample_index in 0..SAMPLE_COUNT {
+        let mut order = [0, 1, 2];
+        let rotation = sample_index % order.len();
+        order.rotate_left(rotation);
+
+        for implementation_index in order {
+            let ns_per_base = match implementation_index {
+                0 => measure_sample(
+                    sequence,
+                    expected_count,
+                    sample_duration,
+                    is_nucleic_acid_match,
+                ),
+                1 => measure_sample(
+                    sequence,
+                    expected_count,
+                    sample_duration,
+                    is_nucleic_acid_iter,
+                ),
+                2 => measure_sample(
+                    sequence,
+                    expected_count,
+                    sample_duration,
+                    is_nucleic_acid_lut,
+                ),
+                _ => unreachable!(),
+            };
+            samples[implementation_index].push(ns_per_base);
         }
-        let elapsed = started.elapsed();
-
-        assert_eq!(result, expected_count, "{name} returned a different result");
-
-        let bases_processed = rounds as f64 * sequence.len() as f64;
-        samples.push(elapsed.as_nanos() as f64 / bases_processed);
     }
 
-    samples.sort_by(f64::total_cmp);
-    let median_ns_per_base = samples[SAMPLE_COUNT / 2];
-    let million_bases_per_second = 1_000.0 / median_ns_per_base;
-
-    println!(
-        "{name:>20}: {median_ns_per_base:>8.3} ns/base, {million_bases_per_second:>8.2} Mbase/s (median of {SAMPLE_COUNT} samples)"
-    );
+    println!("\n{case_name}:");
+    for (name, sample_values) in ["match", "set iteration", "lookup table"]
+        .into_iter()
+        .zip(&mut samples)
+    {
+        sample_values.sort_by(f64::total_cmp);
+        let median_ns_per_base = sample_values[SAMPLE_COUNT / 2];
+        let million_bases_per_second = 1_000.0 / median_ns_per_base;
+        println!(
+            "{name:>20}: {median_ns_per_base:>8.3} ns/base, {million_bases_per_second:>8.2} Mbase/s (median of {SAMPLE_COUNT} samples)"
+        );
+    }
 }
 
 fn repeated_bytes(bytes: &[u8], input_size: usize) -> Vec<u8> {
@@ -182,27 +225,6 @@ fn main() {
             .iter()
             .filter(|&&base| NUCLEIC_ACID_SET.contains(&base))
             .count();
-        println!("\n{case_name}:");
-        benchmark(
-            "match",
-            &sequence,
-            expected_count,
-            config.sample_duration,
-            is_nucleic_acid_match,
-        );
-        benchmark(
-            "set iteration",
-            &sequence,
-            expected_count,
-            config.sample_duration,
-            is_nucleic_acid_iter,
-        );
-        benchmark(
-            "lookup table",
-            &sequence,
-            expected_count,
-            config.sample_duration,
-            is_nucleic_acid_lut,
-        );
+        benchmark_case(case_name, &sequence, expected_count, config.sample_duration);
     }
 }

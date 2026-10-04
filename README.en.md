@@ -64,6 +64,7 @@ SUDKUGDWWTSSYBUCKYUDSAADMMRHMT
 Run the nucleotide-check benchmark with:
 It measures four input patterns: all valid symbols, all invalid symbols, a 50% valid mix, and a 99% valid mix.
 Each implementation is measured for five 200 ms samples, and the median is reported.
+The implementation order rotates between samples to reduce order bias.
 
 ```sh
 cargo bench --bench nucleic_acid
