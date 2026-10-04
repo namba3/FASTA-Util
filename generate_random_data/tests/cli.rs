@@ -69,6 +69,29 @@ fn custom_line_width_wraps_sequence_at_the_requested_width() {
 }
 
 #[test]
+fn custom_line_width_larger_than_generation_buffer_is_preserved() {
+    let output = run_generator(&["123", "--line-width", "73", "--seed", "42"]);
+
+    assert!(
+        output.status.success(),
+        "generator failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("generator output was not UTF-8");
+    let (header, sequence) = stdout
+        .split_once('\n')
+        .expect("generator output did not contain a FASTA header");
+    let lines = sequence.lines().collect::<Vec<_>>();
+
+    assert_eq!(header, ">TestData 123 random data");
+    assert_eq!(lines.iter().map(|line| line.len()).sum::<usize>(), 123);
+    assert_eq!(
+        lines.iter().map(|line| line.len()).collect::<Vec<_>>(),
+        [73, 50]
+    );
+}
+
+#[test]
 fn rejects_a_zero_line_width() {
     let output = run_generator(&["15", "--line-width", "0"]);
     let stderr = String::from_utf8_lossy(&output.stderr);
