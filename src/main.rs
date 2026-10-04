@@ -35,15 +35,16 @@ impl TemporaryOutput {
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
             .unwrap_or_else(|| Path::new("."));
-        let file_name = destination.file_name().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidInput, "output path has no file name")
-        })?;
+        if destination.file_name().is_none() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "output path has no file name",
+            ));
+        }
 
         loop {
             let id = NEXT_TEMP_OUTPUT_ID.fetch_add(1, Ordering::Relaxed);
-            let mut temporary_name = file_name.to_os_string();
-            temporary_name.push(format!(".fasta-util-{}-{id}.tmp", std::process::id()));
-            let temporary = parent.join(temporary_name);
+            let temporary = parent.join(format!(".fasta-util-{}-{id}.tmp", std::process::id()));
             match OpenOptions::new()
                 .write(true)
                 .create_new(true)
