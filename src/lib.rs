@@ -15,8 +15,36 @@ use std::{
 //     Sequence { data: &'a [u8] },
 // }
 
-pub fn read_lines_from_stdin() -> std::io::Lines<impl BufRead> {
-    BufReader::new(std::io::stdin().lock()).lines()
+pub fn read_lines_from_stdin() -> impl Iterator<Item = std::io::Result<Vec<u8>>> {
+    let mut reader = BufReader::new(std::io::stdin().lock());
+    let mut done = false;
+
+    std::iter::from_fn(move || {
+        if done {
+            return None;
+        }
+
+        let mut line = Vec::new();
+        match reader.read_until(b'\n', &mut line) {
+            Ok(0) => {
+                done = true;
+                None
+            }
+            Ok(_) => {
+                if line.ends_with(b"\n") {
+                    line.pop();
+                    if line.ends_with(b"\r") {
+                        line.pop();
+                    }
+                }
+                Some(Ok(line))
+            }
+            Err(error) => {
+                done = true;
+                Some(Err(error))
+            }
+        }
+    })
 }
 
 pub fn read_lines_from_file(file: File) -> Result<LinesInFile, std::io::Error> {
