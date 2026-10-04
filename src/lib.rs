@@ -10,11 +10,6 @@ use std::{
     sync::Arc,
 };
 
-// pub enum FastaLine<'a> {
-//     Header { name: &'a [u8], comment: &'a [u8] },
-//     Sequence { data: &'a [u8] },
-// }
-
 pub fn read_lines_from_stdin() -> impl Iterator<Item = std::io::Result<Vec<u8>>> {
     let mut reader = BufReader::new(std::io::stdin().lock());
     let mut done = false;
