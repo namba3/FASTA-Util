@@ -120,6 +120,62 @@ fn slice_reads_a_crlf_file_and_writes_normalized_fasta_to_a_file() {
 }
 
 #[test]
+fn slice_keeps_existing_output_when_input_validation_fails_after_partial_output() {
+    let input = TemporaryFile::new(b">record\nACGT\nACX\n");
+    let output_file = TemporaryFile::new(b"previous output");
+    let output = run_fasta_util(
+        &[
+            "slice",
+            "--input",
+            input.path(),
+            "--output",
+            output_file.path(),
+        ],
+        b"",
+    );
+
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("invalid nucleic acid"));
+    assert_eq!(output_file.read(), b"previous output");
+}
+
+#[test]
+fn slice_does_not_create_output_when_input_validation_fails() {
+    let input = TemporaryFile::new(b">record\nACX\n");
+    let output_file = TemporaryFile::new(b"remove me");
+    fs::remove_file(&output_file.0).unwrap();
+
+    let output = run_fasta_util(
+        &[
+            "slice",
+            "--input",
+            input.path(),
+            "--output",
+            output_file.path(),
+        ],
+        b"",
+    );
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("invalid nucleic acid"));
+    assert!(!output_file.0.exists());
+}
+
+#[test]
+fn slice_rejects_same_input_and_output_file_without_changing_it() {
+    let input = TemporaryFile::new(b">record\nACGT\n");
+    let output = run_fasta_util(
+        &["slice", "--input", input.path(), "--output", input.path()],
+        b"",
+    );
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("same file"));
+    assert_eq!(input.read(), b">record\nACGT\n");
+}
+
+#[test]
 fn invalid_sequence_returns_an_error_without_panicking() {
     let output = run_fasta_util(&["len"], b"ACX\n");
     let stderr = String::from_utf8_lossy(&output.stderr);
