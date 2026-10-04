@@ -342,6 +342,28 @@ fn indexed_slice_rejects_mismatched_index_without_replacing_output() {
 }
 
 #[test]
+fn indexed_slice_rejects_index_as_output_without_changing_it() {
+    let (input, index) = indexed_fasta_fixture();
+    let original_index = index.read();
+    let output = run_fasta_util(
+        &[
+            "slice",
+            "--input",
+            input.path(),
+            "--fai-index",
+            index.path(),
+            "--output",
+            index.path(),
+        ],
+        b"",
+    );
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("same file"));
+    assert_eq!(index.read(), original_index);
+}
+
+#[test]
 fn indexed_slice_rejects_malformed_and_out_of_bounds_indexes() {
     let (input, _) = indexed_fasta_fixture();
     for contents in [

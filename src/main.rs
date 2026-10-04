@@ -257,6 +257,9 @@ fn slice(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
     if let (Some(input), Some(output)) = (&args.input, &args.output) {
         ensure_distinct_input_output(input, output)?;
     }
+    if let (Some(index), Some(output)) = (&args.fai_index, &args.output) {
+        ensure_distinct_input_output(index, output)?;
+    }
 
     let range = parse_slice_range(&args.range)?;
     if let (Some(index_path), Some(input_path)) = (&args.fai_index, &args.input) {
