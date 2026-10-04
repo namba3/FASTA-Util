@@ -20,7 +20,7 @@ MRY
 
 `len` counts sequence symbols, excluding headers and blank lines. `slice` positions also count only sequence symbols, excluding headers and line breaks. For multiple records, the range indexes the sequences concatenated in file order. Headers encountered before the range ends are preserved, so the output may include a header for a record that contributes no symbols to the selected range. This tool accepts uppercase and lowercase `ACGTNUKSYMWRBDHV` symbols and `-` for a gap. `slice` preserves the original letter case. Other symbols are rejected.
 
-Do not modify an input file while running `len` or non-indexed `slice` against it.
+Do not modify an input file while running `len` or non-indexed `slice` against it. While running indexed `slice`, do not modify either the FASTA input or its `.fai` index.
 
 ## Build
 
