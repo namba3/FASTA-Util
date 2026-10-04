@@ -134,3 +134,7 @@ cargo bench --bench nucleic_acid -- --input-size 100000 --sample-ms 500
 ./scripts/benchmark_real_data.sh
 ./scripts/benchmark_real_data.sh path/to/genomic.fna
 ```
+
+## ライセンス
+
+このプロジェクトは [MIT License](LICENSE-MIT) または [Apache License 2.0](LICENSE-APACHE) のいずれかの条件で利用できます。MIT License の著作権者表記は `namba3 (GitHub: @namba3)` です。

@@ -134,3 +134,7 @@ To reproduce these measurements, install `awk`, `seqkit`, `hyperfine`, and stabl
 ./scripts/benchmark_real_data.sh
 ./scripts/benchmark_real_data.sh path/to/genomic.fna
 ```
+
+## License
+
+This project is available under either the [MIT License](LICENSE-MIT) or the [Apache License 2.0](LICENSE-APACHE), at your option. The MIT License copyright holder is `namba3 (GitHub: @namba3)`.
