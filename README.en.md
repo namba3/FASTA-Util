@@ -4,6 +4,20 @@
 
 A CLI tool for playing with FASTA files
 
+## About the FASTA format
+
+FASTA is a text format for nucleotide or amino acid sequences. Each record starts with a header line beginning with `>`, followed by one or more sequence lines. Sequence data can wrap across multiple lines.
+
+```fasta
+>record-1 optional description
+ACGTN
+UKS-
+>record-2
+MRY
+```
+
+`len` counts sequence symbols, excluding headers and blank lines. `slice` positions also count only sequence symbols, excluding headers and line breaks. This tool accepts the uppercase symbols `ACGTNUKSYMWRBDHV` and `-` for a gap. Lowercase and other symbols are rejected.
+
 ## Build
 
 ```sh
