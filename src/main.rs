@@ -135,6 +135,13 @@ fn invalid_nucleic_acid(byte: u8) -> io::Error {
     )
 }
 
+fn strip_line_ending(line: &[u8]) -> &[u8] {
+    match line.strip_suffix(b"\n") {
+        Some(line) => line.strip_suffix(b"\r").unwrap_or(line),
+        None => line,
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 struct SequenceRange {
     start: usize,
@@ -284,16 +291,14 @@ impl<T: std::io::Write> Writer<T> {
 
         while let Ok(line) = rx.recv() {
             let line = line?;
-            let buf = line.as_ref();
+            let buf = strip_line_ending(line.as_ref());
 
             if let Some(b'>') = buf.first() {
                 if written > 0 && written % *chars_per_line != 0 {
                     writer.write_all(b"\n")?;
                 }
                 writer.write_all(&*buf)?;
-                if !buf.ends_with(b"\n") {
-                    writer.write_all(b"\n")?;
-                }
+                writer.write_all(b"\n")?;
                 continue;
             }
 
@@ -354,6 +359,7 @@ impl<T: std::io::Write> Writer<T> {
 mod tests {
     use super::{
         Args, SequenceRange, Writer, WriterOptions, count_sequence_bases, parse_slice_range,
+        strip_line_ending,
     };
     use clap::Parser;
     use crossbeam::channel::unbounded;
@@ -607,6 +613,22 @@ mod tests {
         let output = write_fasta(&[b">record", b"ACGT"], options(10, None, None));
 
         assert_eq!(output, b">record\nACGT");
+    }
+
+    #[test]
+    fn slice_normalizes_lf_and_crlf_headers_to_the_same_output() {
+        let file_style = write_fasta(&[b">record\r\n", b"ACGT\r\n"], options(10, None, None));
+        let stdin_style = write_fasta(&[b">record", b"ACGT"], options(10, None, None));
+
+        assert_eq!(file_style, b">record\nACGT");
+        assert_eq!(file_style, stdin_style);
+    }
+
+    #[test]
+    fn strip_line_ending_removes_lf_and_crlf_but_preserves_unterminated_cr() {
+        assert_eq!(strip_line_ending(b"line\n"), b"line");
+        assert_eq!(strip_line_ending(b"line\r\n"), b"line");
+        assert_eq!(strip_line_ending(b"line\r"), b"line\r");
     }
 
     #[test]
