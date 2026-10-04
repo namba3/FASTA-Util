@@ -106,21 +106,27 @@ fn validated_sequence(line: &[u8]) -> io::Result<&[u8]> {
     Ok(sequence)
 }
 
+fn with_line_context(line_number: usize, error: io::Error) -> io::Error {
+    io::Error::new(error.kind(), format!("line {line_number}: {error}"))
+}
+
 fn count_sequence_bases<T, I>(iter: I) -> io::Result<u64>
 where
     T: AsRef<[u8]>,
     I: IntoIterator<Item = Result<T, io::Error>>,
 {
     let mut count = 0u64;
-    for line in iter {
-        let line = line?;
+    for (line_index, line) in iter.into_iter().enumerate() {
+        let line_number = line_index + 1;
+        let line = line.map_err(|error| with_line_context(line_number, error))?;
         let line = line.as_ref();
 
         if line.first() == Some(&b'>') {
             continue;
         }
 
-        let sequence = validated_sequence(line)?;
+        let sequence = validated_sequence(line)
+            .map_err(|error| with_line_context(line_number, error))?;
         if sequence.is_empty() {
             continue;
         }
@@ -327,9 +333,11 @@ impl<T: std::io::Write> Writer<T> {
 
         let mut cnt = 0usize;
         let mut written = 0usize;
+        let mut line_number = 0usize;
 
         while let Ok(line) = rx.recv() {
-            let line = line?;
+            line_number += 1;
+            let line = line.map_err(|error| with_line_context(line_number, error))?;
             let buf = strip_line_ending(line.as_ref());
 
             if let Some(b'>') = buf.first() {
@@ -341,7 +349,8 @@ impl<T: std::io::Write> Writer<T> {
                 continue;
             }
 
-            let buf = validated_sequence(buf)?;
+            let buf = validated_sequence(buf)
+                .map_err(|error| with_line_context(line_number, error))?;
             if buf.len() == 0 {
                 continue;
             }
