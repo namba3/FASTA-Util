@@ -315,21 +315,8 @@ fn slice(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     let mut writer = Writer::new(output, writer_options);
 
-    let (hndl, write_result) = match file_lines {
-        Some(mut lines) => {
-            let (tx, rx) = bounded(LINE_CHANNEL_CAPACITY);
-            let hndl = std::thread::spawn(move || -> Result<(), std::io::Error> {
-                while let Some(line) = lines.next() {
-                    if tx.send(Ok(line)).is_err() {
-                        break;
-                    }
-                }
-                Ok(())
-            });
-
-            let write_result = writer.run(rx);
-            (hndl, write_result)
-        }
+    let write_result = match file_lines {
+        Some(lines) => writer.run_file(&lines),
         None => {
             let (tx, rx) = bounded(LINE_CHANNEL_CAPACITY);
             let hndl = std::thread::spawn(move || -> Result<(), std::io::Error> {
@@ -344,18 +331,18 @@ fn slice(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
             });
 
             let write_result = writer.run(rx);
-            (hndl, write_result)
+            let read_result = hndl.join().unwrap_or_else(|_| {
+                Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "input reader thread panicked",
+                ))
+            });
+            write_result?;
+            read_result?;
+            Ok(())
         }
     };
-
-    let read_result = hndl.join().unwrap_or_else(|_| {
-        Err(io::Error::new(
-            io::ErrorKind::Other,
-            "input reader thread panicked",
-        ))
-    });
     write_result?;
-    read_result?;
     drop(writer);
     if let Some(temporary_output) = &mut temporary_output {
         temporary_output.commit()?;
@@ -372,91 +359,105 @@ struct WriterOptions {
 struct Writer<T: std::io::Write> {
     inner: BufWriter<T>,
     options: WriterOptions,
+    count: usize,
+    written: usize,
 }
 impl<T: std::io::Write> Writer<T> {
     fn new(inner: T, options: WriterOptions) -> Self {
         Self {
             inner: BufWriter::new(inner),
             options,
+            count: 0,
+            written: 0,
         }
     }
     fn run<Buf: AsRef<[u8]>>(
         &mut self,
         rx: Receiver<Result<Buf, io::Error>>,
     ) -> Result<(), std::io::Error> {
-        let WriterOptions {
-            chars_per_line,
-            start,
-            end_exclusive,
-        } = &mut self.options;
-        let writer = &mut self.inner;
-
-        let mut cnt = 0usize;
-        let mut written = 0usize;
         let mut line_number = 0usize;
 
         while let Ok(line) = rx.recv() {
             line_number += 1;
             let line = line.map_err(|error| with_line_context(line_number, error))?;
-            let buf = strip_line_ending(line.as_ref());
-
-            if let Some(b'>') = buf.first() {
-                if written > 0 && written % *chars_per_line != 0 {
-                    writer.write_all(b"\n")?;
-                }
-                writer.write_all(&*buf)?;
-                writer.write_all(b"\n")?;
-                continue;
-            }
-
-            let buf =
-                validated_sequence(buf).map_err(|error| with_line_context(line_number, error))?;
-            if buf.len() == 0 {
-                continue;
-            }
-
-            let line_end = cnt + buf.len();
-            let start_in_line = (*start).saturating_sub(cnt);
-            let end_in_line = end_exclusive
-                .map(|end| end.saturating_sub(cnt).min(buf.len()))
-                .unwrap_or(buf.len());
-
-            if start_in_line >= end_in_line {
-                cnt = line_end;
-                if end_exclusive.is_some_and(|end| end <= cnt) {
-                    break;
-                }
-                continue;
-            }
-
-            let mut bases = &buf[start_in_line..end_in_line];
-            let line_written = if start_in_line == 0 {
-                written % *chars_per_line
-            } else {
-                0
-            };
-            let mut line_remain = *chars_per_line - line_written;
-            written += bases.len();
-
-            while line_remain <= bases.len() {
-                writer.write_all(&bases[..line_remain as usize])?;
-                writer.write_all(b"\n")?;
-                bases = &bases[line_remain as usize..];
-                line_remain = *chars_per_line;
-            }
-
-            writer.write_all(bases)?;
-
-            cnt = line_end;
-            if end_exclusive.is_some_and(|end| end <= cnt) {
-                if written > 0 && written % *chars_per_line != 0 {
-                    writer.write_all(b"\n")?;
-                }
+            if !self.process_line(line_number, line.as_ref())? {
                 break;
             }
         }
 
-        writer.flush()
+        self.inner.flush()
+    }
+
+    fn run_file(&mut self, lines: &LinesInFile) -> Result<(), io::Error> {
+        lines.try_for_each_line_while(|line_number, line| self.process_line(line_number, line))?;
+        self.inner.flush()
+    }
+
+    fn process_line(&mut self, line_number: usize, line: &[u8]) -> Result<bool, io::Error> {
+        let buf = strip_line_ending(line);
+        let writer = &mut self.inner;
+        let chars_per_line = self.options.chars_per_line;
+
+        if let Some(b'>') = buf.first() {
+            if self.written > 0 && self.written % chars_per_line != 0 {
+                writer.write_all(b"\n")?;
+            }
+            writer.write_all(buf)?;
+            writer.write_all(b"\n")?;
+            return Ok(true);
+        }
+
+        let buf = validated_sequence(buf).map_err(|error| with_line_context(line_number, error))?;
+        if buf.is_empty() {
+            return Ok(true);
+        }
+
+        let line_end = self.count + buf.len();
+        let start_in_line = self.options.start.saturating_sub(self.count);
+        let end_in_line = self
+            .options
+            .end_exclusive
+            .map(|end| end.saturating_sub(self.count).min(buf.len()))
+            .unwrap_or(buf.len());
+
+        if start_in_line >= end_in_line {
+            self.count = line_end;
+            return Ok(!self
+                .options
+                .end_exclusive
+                .is_some_and(|end| end <= self.count));
+        }
+
+        let mut bases = &buf[start_in_line..end_in_line];
+        let line_written = if start_in_line == 0 {
+            self.written % chars_per_line
+        } else {
+            0
+        };
+        let mut line_remain = chars_per_line - line_written;
+        self.written += bases.len();
+
+        while line_remain <= bases.len() {
+            writer.write_all(&bases[..line_remain])?;
+            writer.write_all(b"\n")?;
+            bases = &bases[line_remain..];
+            line_remain = chars_per_line;
+        }
+
+        writer.write_all(bases)?;
+        self.count = line_end;
+        if self
+            .options
+            .end_exclusive
+            .is_some_and(|end| end <= self.count)
+        {
+            if self.written > 0 && self.written % chars_per_line != 0 {
+                writer.write_all(b"\n")?;
+            }
+            return Ok(false);
+        }
+
+        Ok(true)
     }
 }
 

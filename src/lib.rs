@@ -88,6 +88,19 @@ impl LinesInFile {
         &self,
         mut visitor: impl FnMut(usize, &[u8]) -> Result<(), E>,
     ) -> Result<(), E> {
+        self.try_for_each_line_while(|line_number, line| {
+            visitor(line_number, line)?;
+            Ok(true)
+        })
+    }
+
+    /// Visits borrowed mapped lines until the visitor returns `false`.
+    ///
+    /// `line_number` is one-based. A line includes its trailing newline when present.
+    pub fn try_for_each_line_while<E>(
+        &self,
+        mut visitor: impl FnMut(usize, &[u8]) -> Result<bool, E>,
+    ) -> Result<(), E> {
         let Some(mmap) = &self.mmap else {
             return Ok(());
         };
@@ -96,7 +109,9 @@ impl LinesInFile {
         let mut line_number = 0;
         while let Some(line) = line_at(mmap, head) {
             line_number += 1;
-            visitor(line_number, line)?;
+            if !visitor(line_number, line)? {
+                break;
+            }
             head += line.len();
         }
         Ok(())
@@ -277,6 +292,25 @@ mod tests {
 
         assert_eq!(error.to_string(), "visitor stopped");
         assert_eq!(visited, [b"first\n".to_vec(), b"second\n".to_vec()]);
+    }
+
+    #[test]
+    fn borrowed_line_visitor_can_stop_without_visiting_later_lines() {
+        let input = TemporaryInput::new(b"first\nsecond\nthird");
+        let lines = read_lines_from_file(input.open()).unwrap();
+        let mut visited = Vec::new();
+
+        lines
+            .try_for_each_line_while(|line_number, line| {
+                visited.push((line_number, line.to_vec()));
+                Ok::<_, std::io::Error>(line_number < 2)
+            })
+            .unwrap();
+
+        assert_eq!(
+            visited,
+            [(1, b"first\n".to_vec()), (2, b"second\n".to_vec())]
+        );
     }
 
     #[test]

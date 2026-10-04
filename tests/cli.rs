@@ -510,6 +510,16 @@ fn slice_keeps_existing_output_when_input_validation_fails_after_partial_output(
 }
 
 #[test]
+fn bounded_file_slice_stops_before_invalid_sequence_after_the_range() {
+    let input = TemporaryFile::new(b">record\nACGT\nACX\n");
+    let output = run_fasta_util(&["slice", "--input", input.path(), "--range", "0..2"], b"");
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(output.stderr.is_empty());
+    assert_eq!(output.stdout, b">record\nAC\n");
+}
+
+#[test]
 fn slice_does_not_create_output_when_input_validation_fails() {
     let input = TemporaryFile::new(b">record\nACX\n");
     let output_file = TemporaryFile::new(b"remove me");
