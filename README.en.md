@@ -55,6 +55,12 @@ Each implementation is measured for five 200 ms samples, and the median is repor
 cargo bench --bench nucleic_acid
 ```
 
+Set the input size and duration of each sample with these options. The defaults are 10,000 bytes and 200 ms.
+
+```sh
+cargo bench --bench nucleic_acid -- --input-size 100000 --sample-ms 500
+```
+
 OS: Ubuntu (WSL2)
 
 CPU: AMD Ryzen 9 5900X

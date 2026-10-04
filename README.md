@@ -55,6 +55,12 @@ SUDKUGDWWTSSYBUCKYUDSAADMMRHMT
 cargo bench --bench nucleic_acid
 ```
 
+入力サイズと各サンプルの計測時間は、次のように変更できます。標準では10,000バイト、200ミリ秒です。
+
+```sh
+cargo bench --bench nucleic_acid -- --input-size 100000 --sample-ms 500
+```
+
 OS: Ubuntu (WSL2)
 
 CPU: AMD Ryzen 9 5900X
