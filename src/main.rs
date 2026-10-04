@@ -1,27 +1,27 @@
 use clap::{Parser, Subcommand};
 use core::panic;
-use crossbeam::channel::{unbounded, Receiver};
+use crossbeam::channel::{Receiver, unbounded};
 use fasta_util::{is_nucleic_acid, read_lines_from_file, read_lines_from_stdin};
 use std::io::{BufWriter, Write};
 
 #[derive(Parser)]
-#[clap(author, version, about)]
+#[command(author, version, about)]
 struct Args {
-    #[clap(subcommand)]
+    #[command(subcommand)]
     sub: SubCommand,
 }
 
 #[derive(Subcommand)]
 enum SubCommand {
-    #[clap(about = "Count the total length of the sequence")]
+    #[command(about = "Count the total length of the sequence")]
     Len(LenArgs),
-    #[clap(about = "Cut out a part of the sequence")]
+    #[command(about = "Cut out a part of the sequence")]
     Slice(SliceArgs),
 }
 
 #[derive(Parser)]
 struct LenArgs {
-    #[clap(
+    #[arg(
         short,
         long,
         help = "Specify input file\nIf omitted, read from standard input"
@@ -31,28 +31,28 @@ struct LenArgs {
 
 #[derive(Parser)]
 struct SliceArgs {
-    #[clap(
+    #[arg(
         short,
         long,
         help = "Specify input file\nIf omitted, read from standard input"
     )]
     input: Option<String>,
 
-    #[clap(
+    #[arg(
         short,
         long,
         help = "Specify output file\nIf omitted, write to standard output"
     )]
     output: Option<String>,
 
-    #[clap(
+    #[arg(
         long,
         default_value = "..",
         help = "Specify slice range\nexamples:\n\t2..10\tmeans [2,10)\n\t2..=10\tmeans [2,10]\n\t..10\tmeans [0,10)\n\t2..\tmeans [2,∞)\n\t..\tmeans [0,∞)\n"
     )]
     range: String,
 
-    #[clap(
+    #[arg(
         long,
         default_value_t = 60,
         help = "Specify the number of characters per line when exporting a sequence"
@@ -306,7 +306,7 @@ impl<T: std::io::Write> Writer<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::{count_sequence_bases, Writer, WriterOptions};
+    use super::{Writer, WriterOptions, count_sequence_bases};
     use crossbeam::channel::unbounded;
 
     fn write_fasta(lines: &[&[u8]], options: WriterOptions) -> Vec<u8> {

@@ -99,8 +99,8 @@ mod tests {
     macro_rules! test_is_nucleobase {
         ($name:ident) => {
             mod $name {
-                use super::super::$name;
                 use super::super::NUCLEIC_ACID_SET;
+                use super::super::$name;
 
                 #[test]
                 fn accept_valid_elems() {
@@ -128,18 +128,18 @@ mod tests {
 mod benchs {
     extern crate test;
     use super::NUCLEIC_ACID_SET;
-    use rand::Rng;
+    use rand::RngExt;
     use std::sync::LazyLock;
     use test::Bencher;
 
     static SEQ: LazyLock<Vec<u8>> = LazyLock::new(|| {
         const SIZE: usize = 10000;
 
-        let mut rand = rand::thread_rng();
+        let mut rng = rand::rng();
 
         let mut v = Vec::with_capacity(SIZE);
         for _ in 0..SIZE {
-            let idx = rand.gen::<usize>() % NUCLEIC_ACID_SET.len();
+            let idx = rng.random_range(0..NUCLEIC_ACID_SET.len());
             v.push(NUCLEIC_ACID_SET[idx]);
         }
 

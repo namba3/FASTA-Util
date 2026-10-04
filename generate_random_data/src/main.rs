@@ -1,5 +1,5 @@
 use fasta_util::nucleic_acid::NUCLEIC_ACID_SET;
-use rand::Rng;
+use rand::RngExt;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = std::env::args().collect::<Vec<String>>();
@@ -11,11 +11,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or(10000)
         .max(1);
 
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let mut v = Vec::with_capacity(size);
     let set = &NUCLEIC_ACID_SET[..16];
     for _ in 0..size {
-        let idx = rng.gen::<usize>() % set.len();
+        let idx = rng.random_range(0..set.len());
         v.push(set[idx]);
     }
 
