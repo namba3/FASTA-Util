@@ -204,14 +204,15 @@ fn read_header(file: &mut File, sequence_offset: u64, expected_name: &[u8]) -> i
 
     let mut search_end = header_end;
     let mut header_start = 0u64;
+    let mut block = [0; HEADER_SCAN_BUFFER_SIZE as usize];
     while search_end > 0 {
         let block_start = search_end.saturating_sub(HEADER_SCAN_BUFFER_SIZE);
         let block_length = usize::try_from(search_end - block_start)
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "FASTA header is too long"))?;
-        let mut block = vec![0; block_length];
         file.seek(SeekFrom::Start(block_start))?;
-        file.read_exact(&mut block)?;
-        if let Some(newline) = block.iter().rposition(|byte| *byte == b'\n') {
+        let chunk = &mut block[..block_length];
+        file.read_exact(chunk)?;
+        if let Some(newline) = chunk.iter().rposition(|byte| *byte == b'\n') {
             header_start = block_start + newline as u64 + 1;
             break;
         }
