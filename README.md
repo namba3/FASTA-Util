@@ -58,6 +58,8 @@ cargo run --manifest-path=generate_random_data/Cargo.toml -- 10000 --line-width 
 
 配列の一部を切り出します。
 
+`-o`/`--output`で出力ファイルを指定すると、処理が成功した場合にだけ出力先を置き換えます。入力ファイルと同じファイルは出力先に指定できません。
+
 ```sh
 ./target/release/fasta-util slice -i test.fna --range 99..=199
 ```

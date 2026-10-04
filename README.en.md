@@ -58,6 +58,8 @@ Count the total length of the sequence
 
 Cut out a part of the sequence
 
+When `-o`/`--output` specifies a file, the destination is replaced only after processing succeeds. The input file cannot also be used as the output file.
+
 ```sh
 ./target/release/fasta-util slice -i test.fna --range 99..=199
 ```
