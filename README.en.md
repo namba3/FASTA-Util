@@ -96,9 +96,9 @@ cargo bench --bench nucleic_acid -- --input-size 100000 --sample-ms 500
 
 Measurements were taken on 2026-10-04 using the RefSeq GRCh38.p14 FASTA in `dataset/ncbi_dataset`. The full-genome length comparison used `GCF_000001405.40_GRCh38.p14_genomic.fna` (3,339,739,109 bytes), containing 705 records. Slice comparisons used its chromosome 1 record (`NC_000001.11`, 248,956,422 bases).
 
-The benchmark used the source FASTA directly and preserved its lowercase soft-masked sequence. Before timing each slice case, the `seqret`, regular `slice`, and `.fai` indexed `slice` outputs were verified byte-for-byte.
+The benchmark used the source FASTA directly and preserved its lowercase soft-masked sequence. Before timing each slice case, regular `slice` and `.fai` indexed `slice` outputs were verified byte-for-byte. If `seqret` is installed, its output is also verified and included in the comparison.
 
-The regular and `.fai` paths were remeasured on 2026-10-04 using the same CPU, OS, stable Rust, and hyperfine setup. Their outputs were compared byte-for-byte before five timed runs. `seqret` was unavailable during this remeasurement, so only its values in the table are from the earlier run.
+The regular and `.fai` paths were remeasured by the benchmark script on 2026-10-04 using the same CPU, OS, stable Rust, and hyperfine setup. Their outputs were compared byte-for-byte before five timed runs. `seqret` was unavailable during this remeasurement, so only its values in the table are from the earlier run. Hyperfine reported a statistical outlier for the 100-base slice from the start; treat the small timing difference from the regular path as measurement noise.
 
 Environment: Ubuntu 26.04.1 LTS (WSL2), AMD Ryzen 9 9900X, stable Rust 1.99.0, seqkit 2.10.1, EMBOSS seqret 6.6.0.0, and hyperfine 1.20.0. Each command had one warmup followed by five measured runs. Tables show the mean and standard deviation. Results vary with the machine and file-cache state.
 
@@ -117,14 +117,14 @@ Ranges are positions within chromosome 1. `seqret` uses one-based inclusive coor
 
 | Offset | Slice length | seqret (mean ± standard deviation) | fasta-util (regular, mean ± standard deviation) | fasta-util (FAI, mean ± standard deviation) |
 | ---: | ---: | ---: | ---: | ---: |
-| 100,000,000 | 100,000,000 | 843 ± 46 ms | 569.7 ± 135.9 ms | 66.9 ± 3.5 ms |
-| 100,000,000 | 100,000 | 745 ± 39 ms | 293.9 ± 17.6 ms | 1.8 ± 0.6 ms |
-| 100,000,000 | 100 | 731 ± 113 ms | 294.7 ± 55.4 ms | 1.7 ± 0.2 ms |
-| 0 | 100,000,000 | 866 ± 43 ms | 268.1 ± 45.7 ms | 77.2 ± 7.6 ms |
-| 0 | 100,000 | 769 ± 113 ms | 2.8 ± 0.3 ms | 1.7 ± 0.2 ms |
-| 0 | 100 | 618 ± 137 ms | 2.0 ± 0.1 ms | 1.6 ± 0.2 ms |
+| 100,000,000 | 100,000,000 | 843 ± 46 ms | 692.4 ± 51.3 ms | 69.5 ± 9.4 ms |
+| 100,000,000 | 100,000 | 745 ± 39 ms | 548.1 ± 293.6 ms | 1.4 ± 0.1 ms |
+| 100,000,000 | 100 | 731 ± 113 ms | 434.5 ± 60.4 ms | 1.6 ± 0.2 ms |
+| 0 | 100,000,000 | 866 ± 43 ms | 384.1 ± 40.5 ms | 62.8 ± 2.1 ms |
+| 0 | 100,000 | 769 ± 113 ms | 2.8 ± 0.4 ms | 1.7 ± 0.2 ms |
+| 0 | 100 | 618 ± 137 ms | 2.1 ± 0.2 ms | 1.9 ± 0.3 ms |
 
-To reproduce these measurements, install `awk`, `seqkit`, `seqret`, `hyperfine`, and stable Rust, then run this script from the repository root. An alternate FASTA path can be supplied as the first argument.
+To reproduce these measurements, install `awk`, `seqkit`, `hyperfine`, and stable Rust, then run this script from the repository root. `seqret` is optional and adds an external-tool comparison when installed. An alternate FASTA path can be supplied as the first argument.
 
 ```sh
 ./scripts/benchmark_real_data.sh

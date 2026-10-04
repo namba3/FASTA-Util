@@ -10,12 +10,15 @@ seqret="$(command -v seqret || true)"
 hyperfine="$(command -v hyperfine || true)"
 awk_bin="$(command -v awk || true)"
 
-for tool in "$rustup_bin" "$seqkit" "$seqret" "$hyperfine" "$awk_bin"; do
+for tool in "$rustup_bin" "$seqkit" "$hyperfine" "$awk_bin"; do
     if [[ -z "$tool" || ! -x "$tool" ]]; then
-        printf 'Required command not found: %s\n' "${tool:-seqkit/seqret/hyperfine}" >&2
+        printf 'Required command not found: %s\n' "${tool:-rustup/seqkit/hyperfine/awk}" >&2
         exit 1
     fi
 done
+if [[ -n "$seqret" && ! -x "$seqret" ]]; then
+    seqret=""
+fi
 if [[ ! -f "$dataset" ]]; then
     printf 'FASTA dataset not found: %s\n' "$dataset" >&2
     exit 1
@@ -33,7 +36,11 @@ LC_ALL=C "$awk_bin" -f "$repo_root/scripts/write_fai.awk" "$chr1" > "$fai"
 
 printf '%s\n' 'Tool versions:'
 "$seqkit" version
-"$seqret" -version
+if [[ -n "$seqret" ]]; then
+    "$seqret" -version
+else
+    printf '%s\n' 'EMBOSS seqret not found; external comparison will be skipped'
+fi
 "$rustup_bin" run stable rustc --version
 printf '\n%s\n' 'Dataset statistics:'
 printf 'Source: %s\n' "$dataset"
@@ -53,7 +60,6 @@ q_dataset="$(q "$dataset")"
 q_chr1="$(q "$chr1")"
 q_binary="$(q "$binary")"
 q_seqkit="$(q "$seqkit")"
-q_seqret="$(q "$seqret")"
 q_fai="$(q "$fai")"
 
 printf '\n%s\n' 'Full assembly length benchmark (1 warmup, 5 measured runs):'
@@ -64,25 +70,33 @@ printf '\n%s\n' 'Full assembly length benchmark (1 warmup, 5 measured runs):'
 printf '\n%s\n' 'chr1 slice benchmarks (1 warmup, 5 measured runs):'
 while read -r name start length; do
     end=$((start + length - 1))
-    seqret_start=$((start + 1))
-    seqret_end=$((start + length))
-    seqret_command="$q_seqret -sequence $q_chr1 -sbegin $seqret_start -send $seqret_end -auto -stdout"
     fasta_command="$q_binary slice -i $q_chr1 --chars-per-line=60 --range ${start}..=${end}"
     indexed_command="$q_binary slice -i $q_chr1 --fai-index $q_fai --chars-per-line=60 --range ${start}..=${end}"
 
-    "$seqret" -sequence "$chr1" -sbegin "$seqret_start" -send "$seqret_end" -auto -stdout > "$work_dir/seqret.out"
     "$binary" slice -i "$chr1" --chars-per-line=60 --range "${start}..=${end}" > "$work_dir/fasta-util.out"
     "$binary" slice -i "$chr1" --fai-index "$fai" --chars-per-line=60 --range "${start}..=${end}" > "$work_dir/fasta-util-indexed.out"
-    if ! cmp -s "$work_dir/seqret.out" "$work_dir/fasta-util.out" || ! cmp -s "$work_dir/fasta-util.out" "$work_dir/fasta-util-indexed.out"; then
+    if ! cmp -s "$work_dir/fasta-util.out" "$work_dir/fasta-util-indexed.out"; then
         printf 'Output mismatch for slice case %s\n' "$name" >&2
         exit 1
     fi
+    if [[ -n "$seqret" ]]; then
+        seqret_start=$((start + 1))
+        seqret_end=$((start + length))
+        "$seqret" -sequence "$chr1" -sbegin "$seqret_start" -send "$seqret_end" -auto -stdout > "$work_dir/seqret.out"
+        if ! cmp -s "$work_dir/seqret.out" "$work_dir/fasta-util.out"; then
+            printf 'seqret output mismatch for slice case %s\n' "$name" >&2
+            exit 1
+        fi
+    fi
 
     printf '\n%s\n' "$name: offset=$start length=$length"
-    "$hyperfine" --shell=none --warmup 1 --runs 5 --style basic \
-        -n seqret "$seqret_command" \
-        -n fasta-util "$fasta_command" \
-        -n 'fasta-util (FAI)' "$indexed_command"
+    hyperfine_args=(--shell=none --warmup 1 --runs 5 --style basic)
+    if [[ -n "$seqret" ]]; then
+        seqret_command="$(q "$seqret") -sequence $q_chr1 -sbegin $((start + 1)) -send $((start + length)) -auto -stdout"
+        hyperfine_args+=(-n seqret "$seqret_command")
+    fi
+    hyperfine_args+=(-n fasta-util "$fasta_command" -n 'fasta-util (FAI)' "$indexed_command")
+    "$hyperfine" "${hyperfine_args[@]}"
 done <<'CASES'
 middle_100M 100000000 100000000
 middle_100K 100000000 100000
