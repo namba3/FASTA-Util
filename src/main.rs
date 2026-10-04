@@ -100,7 +100,9 @@ fn len(args: LenArgs) -> Result<(), Box<dyn std::error::Error>> {
     let len = match args.input {
         Some(input) => {
             let input = std::fs::OpenOptions::new().read(true).open(input)?;
-            let lines = read_lines_from_file(input)?;
+            // SAFETY: Input files must remain unchanged for the duration of this command;
+            // this command only reads the file and never modifies it.
+            let lines = unsafe { read_lines_from_file(input)? };
             count_sequence_bases_from_file(&lines)?
         }
         None => count_sequence_bases(read_lines_from_stdin())?,
@@ -314,7 +316,9 @@ fn slice(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
     let file_lines = match args.input {
         Some(input) => {
             let input = std::fs::OpenOptions::new().read(true).open(input)?;
-            Some(read_lines_from_file(input)?)
+            // SAFETY: Input files must remain unchanged for the duration of this command;
+            // this command only reads the file and never modifies it.
+            Some(unsafe { read_lines_from_file(input)? })
         }
         None => None,
     };

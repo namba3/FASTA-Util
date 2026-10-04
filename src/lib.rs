@@ -44,10 +44,14 @@ pub fn read_lines_from_stdin() -> impl Iterator<Item = std::io::Result<Vec<u8>>>
 
 /// Reads file lines through a memory map without copying the file contents.
 ///
-/// The file must not be modified or truncated while the returned iterator or any
-/// `LineInFile` yielded by it is alive. Each yielded line keeps the mapping alive,
-/// even after the iterator is dropped.
-pub fn read_lines_from_file(file: File) -> Result<LinesInFile, std::io::Error> {
+/// Each yielded line keeps the mapping alive, even after the iterator is dropped.
+///
+/// # Safety
+///
+/// The backing file must not be modified or truncated by this process or another
+/// process until the returned iterator and every `LineInFile` yielded by it have
+/// been dropped.
+pub unsafe fn read_lines_from_file(file: File) -> Result<LinesInFile, std::io::Error> {
     if file.metadata()?.len() == 0 {
         return Ok(LinesInFile {
             mmap: None,
@@ -55,9 +59,8 @@ pub fn read_lines_from_file(file: File) -> Result<LinesInFile, std::io::Error> {
         });
     }
 
-    // SAFETY: The returned iterator and each yielded line retain the mapping. The
-    // caller must keep the backing file unchanged for those values' lifetimes,
-    // as documented above.
+    // SAFETY: The caller guarantees the backing file remains unchanged for the
+    // lifetime of the iterator and every yielded line.
     let mmap = unsafe { memmap2::Mmap::map(&file) }?;
     Ok(lines(mmap))
 }
@@ -144,7 +147,7 @@ fn line_at(mmap: &[u8], head: usize) -> Option<&[u8]> {
 
 #[cfg(test)]
 mod tests {
-    use super::read_lines_from_file;
+    use super::{LinesInFile, read_lines_from_file};
     use std::{
         fs::{self, File, OpenOptions},
         io::Write,
@@ -178,10 +181,14 @@ mod tests {
         }
     }
 
+    fn read_lines(input: &TemporaryInput) -> LinesInFile {
+        // SAFETY: These test fixtures are never modified while their mappings are alive.
+        unsafe { read_lines_from_file(input.open()).unwrap() }
+    }
+
     fn collect_lines(contents: &[u8]) -> Vec<Vec<u8>> {
         let input = TemporaryInput::new(contents);
-        read_lines_from_file(input.open())
-            .unwrap()
+        read_lines(&input)
             .map(|line| line.as_ref().to_vec())
             .collect()
     }
@@ -243,7 +250,7 @@ mod tests {
     #[test]
     fn iterator_stays_exhausted_after_the_last_line() {
         let input = TemporaryInput::new(b"one line");
-        let mut lines = read_lines_from_file(input.open()).unwrap();
+        let mut lines = read_lines(&input);
 
         assert_eq!(lines.next().unwrap().as_ref(), b"one line");
         assert!(lines.next().is_none());
@@ -253,7 +260,7 @@ mod tests {
     #[test]
     fn borrowed_line_visitor_preserves_line_bytes_and_numbers() {
         let input = TemporaryInput::new(b"first\r\n\nlast");
-        let lines = read_lines_from_file(input.open()).unwrap();
+        let lines = read_lines(&input);
         let mut visited = Vec::new();
 
         lines
@@ -276,7 +283,7 @@ mod tests {
     #[test]
     fn borrowed_line_visitor_stops_on_the_first_error() {
         let input = TemporaryInput::new(b"first\nsecond\nthird");
-        let lines = read_lines_from_file(input.open()).unwrap();
+        let lines = read_lines(&input);
         let mut visited = Vec::new();
 
         let error = lines
@@ -297,7 +304,7 @@ mod tests {
     #[test]
     fn borrowed_line_visitor_can_stop_without_visiting_later_lines() {
         let input = TemporaryInput::new(b"first\nsecond\nthird");
-        let lines = read_lines_from_file(input.open()).unwrap();
+        let lines = read_lines(&input);
         let mut visited = Vec::new();
 
         lines
@@ -316,7 +323,7 @@ mod tests {
     #[test]
     fn borrowed_line_visitor_does_not_call_back_for_an_empty_file() {
         let input = TemporaryInput::new(b"");
-        let lines = read_lines_from_file(input.open()).unwrap();
+        let lines = read_lines(&input);
         let mut visited = false;
 
         lines
@@ -332,7 +339,7 @@ mod tests {
     #[test]
     fn line_clone_keeps_mapped_bytes_alive_after_iterator_is_dropped() {
         let input = TemporaryInput::new(b"mapped line\n");
-        let mut lines = read_lines_from_file(input.open()).unwrap();
+        let mut lines = read_lines(&input);
         let line = lines.next().unwrap();
         let clone = line.clone();
         drop(line);
@@ -344,7 +351,7 @@ mod tests {
     #[test]
     fn lines_keep_distinct_ranges_after_iterator_is_dropped() {
         let input = TemporaryInput::new(b"same\nsame\nlast");
-        let mut lines = read_lines_from_file(input.open()).unwrap();
+        let mut lines = read_lines(&input);
         let first = lines.next().unwrap();
         let second = lines.next().unwrap();
         let third = lines.next().unwrap();
