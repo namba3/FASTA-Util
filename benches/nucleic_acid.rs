@@ -7,7 +7,8 @@ use std::{
 };
 
 const INPUT_SIZE: usize = 10_000;
-const MEASURE_FOR: Duration = Duration::from_secs(1);
+const MEASURE_FOR: Duration = Duration::from_millis(200);
+const SAMPLE_COUNT: usize = 5;
 const WARMUP_ROUNDS: usize = 10;
 const INVALID_BASES: &[u8] = b"xyz0123?";
 
@@ -30,23 +31,29 @@ where
         black_box(count_valid(black_box(sequence), &predicate));
     }
 
-    let started = Instant::now();
-    let mut rounds = 0u64;
-    let mut result = 0;
-    while started.elapsed() < MEASURE_FOR {
-        result = black_box(count_valid(black_box(sequence), &predicate));
-        rounds += 1;
+    let mut samples = Vec::with_capacity(SAMPLE_COUNT);
+    for _ in 0..SAMPLE_COUNT {
+        let started = Instant::now();
+        let mut rounds = 0u64;
+        let mut result = 0;
+        while started.elapsed() < MEASURE_FOR {
+            result = black_box(count_valid(black_box(sequence), &predicate));
+            rounds += 1;
+        }
+        let elapsed = started.elapsed();
+
+        assert_eq!(result, expected_count, "{name} returned a different result");
+
+        let bases_processed = rounds as f64 * sequence.len() as f64;
+        samples.push(elapsed.as_nanos() as f64 / bases_processed);
     }
-    let elapsed = started.elapsed();
 
-    assert_eq!(result, expected_count, "{name} returned a different result");
-
-    let bases_processed = rounds as f64 * sequence.len() as f64;
-    let ns_per_base = elapsed.as_nanos() as f64 / bases_processed;
-    let million_bases_per_second = bases_processed / elapsed.as_secs_f64() / 1_000_000.0;
+    samples.sort_by(f64::total_cmp);
+    let median_ns_per_base = samples[SAMPLE_COUNT / 2];
+    let million_bases_per_second = 1_000.0 / median_ns_per_base;
 
     println!(
-        "{name:>20}: {ns_per_base:>8.3} ns/base, {million_bases_per_second:>8.2} Mbase/s ({rounds} rounds)"
+        "{name:>20}: {median_ns_per_base:>8.3} ns/base, {million_bases_per_second:>8.2} Mbase/s (median of {SAMPLE_COUNT} samples)"
     );
 }
 
@@ -75,8 +82,8 @@ fn mixed_sequence(valid_percent: u32, mut state: u32) -> Vec<u8> {
 
 fn main() {
     println!(
-        "Input: {INPUT_SIZE} bytes per pattern; measuring each implementation for {} second(s)",
-        MEASURE_FOR.as_secs()
+        "Input: {INPUT_SIZE} bytes per pattern; measuring each implementation for {SAMPLE_COUNT} samples of {} ms",
+        MEASURE_FOR.as_millis()
     );
 
     let cases = [
