@@ -72,6 +72,18 @@ The default `auto` mode selects protein when it finds a protein symbol that is n
 ./target/release/fasta-util stats proteins.faa --sequence-type protein --format json
 ```
 
+### filter
+
+Select records by sequence length, GC fraction, and `N` fraction. Fractions use values from `0.0` to `1.0`; records must satisfy every supplied condition. GC and `N` fractions use the full sequence length as the denominator, including gaps and ambiguous symbols. Sequence type is detected automatically; a protein-only symbol selects protein mode. For proteins that cannot be distinguished from nucleotide sequences, specify `--sequence-type protein`. GC and `N` conditions are available only for nucleotide sequences. Matching records are written in input order to standard output, or to a file with `-o`/`--output`.
+
+```sh
+./target/release/fasta-util filter seq.fa --min-len 1000
+./target/release/fasta-util filter seq.fa --max-len 10000
+./target/release/fasta-util filter seq.fa --min-gc 0.40 --max-gc 0.60
+./target/release/fasta-util filter seq.fa --max-n 0.05
+./target/release/fasta-util filter proteins.fa --min-len 100 --sequence-type protein
+```
+
 ### get
 
 Get complete records by ID, record regions using `ID:START-END`, or a global range using `START-END`. Coordinates are 1-based and inclusive. Global ranges index all record sequences concatenated in FASTA order. Multiple IDs and an ID file passed with `--ids` are supported; output follows the records' order in the FASTA file. If a `.fai` sidecar exists next to the input, regions are read directly; otherwise, the file is scanned from the beginning. Pass `--fai-index` to use a specific index. Set output wrapping with `--chars-per-line`.

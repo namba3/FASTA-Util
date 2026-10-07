@@ -72,6 +72,18 @@ FASTA全体のレコード数、合計・最小・最大・平均長、N50、GC�
 ./target/release/fasta-util stats proteins.faa --sequence-type protein --format json
 ```
 
+### filter
+
+配列ごとの長さ、GC割合、`N`割合でレコードを選びます。割合は`0.0`から`1.0`で指定し、指定した条件はすべて満たす必要があります。GCと`N`の割合は、ギャップや曖昧な記号を含む配列全体の長さを分母にします。配列種別は自動判定し、タンパク質だけにある記号が含まれればタンパク質として扱います。核酸配列と区別できないタンパク質配列は`--sequence-type protein`で明示できます。GCと`N`の条件は核酸配列でのみ使えます。選択したレコードは入力順で標準出力に出力し、`-o`/`--output`でファイルにも保存できます。
+
+```sh
+./target/release/fasta-util filter seq.fa --min-len 1000
+./target/release/fasta-util filter seq.fa --max-len 10000
+./target/release/fasta-util filter seq.fa --min-gc 0.40 --max-gc 0.60
+./target/release/fasta-util filter seq.fa --max-n 0.05
+./target/release/fasta-util filter proteins.fa --min-len 100 --sequence-type protein
+```
+
 ### get
 
 指定したIDのレコード全体、`ID:開始-終了`形式のレコード内領域、または`開始-終了`形式の全体範囲を取得します。座標は1始まりで両端を含みます。全体範囲は全レコードの配列をファイル順に連結した位置です。複数IDや`--ids`ファイルに対応し、出力はFASTA内の出現順です。入力の隣に`.fai`があれば領域を直接読み込み、なければ先頭から検索します。インデックスを明示する場合は`--fai-index`を指定します。配列の折り返し幅は`--chars-per-line`で指定できます。

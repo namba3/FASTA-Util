@@ -1,4 +1,5 @@
 mod fasta_index;
+mod filter;
 mod get;
 mod output;
 mod stats;
@@ -35,6 +36,8 @@ enum SubCommand {
     Stats(StatsArgs),
     #[command(about = "Get FASTA records, ID regions, or global ranges")]
     Get(GetArgs),
+    #[command(about = "Filter FASTA records by sequence properties")]
+    Filter(FilterArgs),
 }
 
 #[derive(Parser)]
@@ -102,6 +105,40 @@ struct GetArgs {
     /// Number of sequence characters per output line
     #[arg(long, default_value_t = 60, value_parser = parse_positive_line_width)]
     chars_per_line: usize,
+}
+
+#[derive(Parser)]
+struct FilterArgs {
+    /// FASTA file to filter
+    input: PathBuf,
+
+    /// Keep records with at least this many sequence symbols
+    #[arg(long)]
+    min_len: Option<u64>,
+
+    /// Keep records with at most this many sequence symbols
+    #[arg(long)]
+    max_len: Option<u64>,
+
+    /// Keep records with at least this GC fraction (0.0 to 1.0)
+    #[arg(long, value_parser = parse_fraction)]
+    min_gc: Option<f64>,
+
+    /// Keep records with at most this GC fraction (0.0 to 1.0)
+    #[arg(long, value_parser = parse_fraction)]
+    max_gc: Option<f64>,
+
+    /// Keep records with at most this N fraction (0.0 to 1.0)
+    #[arg(long, value_parser = parse_fraction)]
+    max_n: Option<f64>,
+
+    /// Sequence alphabet to validate (nucleotide or protein)
+    #[arg(long, value_enum, default_value_t = StatsSequenceType::Auto)]
+    sequence_type: StatsSequenceType,
+
+    /// Write output to a file instead of standard output
+    #[arg(short, long)]
+    output: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
@@ -174,6 +211,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             stats::run(&args.input, args.each, args.format, args.sequence_type)?
         }
         SubCommand::Get(args) => get::run(args)?,
+        SubCommand::Filter(args) => filter::run(args)?,
     }
 
     Ok(())
@@ -187,6 +225,16 @@ fn parse_positive_line_width(value: &str) -> Result<usize, String> {
         return Err("characters per line must be greater than zero".to_owned());
     }
     Ok(width)
+}
+
+fn parse_fraction(value: &str) -> Result<f64, String> {
+    let fraction = value
+        .parse::<f64>()
+        .map_err(|error| format!("invalid fraction: {error}"))?;
+    if !fraction.is_finite() || !(0.0..=1.0).contains(&fraction) {
+        return Err("fraction must be between 0.0 and 1.0".to_owned());
+    }
+    Ok(fraction)
 }
 
 fn len(args: LenArgs) -> Result<(), Box<dyn std::error::Error>> {

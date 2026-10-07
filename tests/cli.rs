@@ -466,6 +466,178 @@ fn stats_rejects_sequence_data_before_first_record() {
 }
 
 #[test]
+fn filter_combines_inclusive_length_bounds_and_preserves_record_order() {
+    let input = TemporaryFile::new(
+        b">short\nAC\n>first-match description\nACGT\n>long\nACGTACG\n>second-match\nACG\n",
+    );
+    let output = run_fasta_util(
+        &["filter", input.path(), "--min-len", "3", "--max-len", "4"],
+        b"",
+    );
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        output.stdout,
+        b">first-match description\nACGT\n>second-match\nACG\n"
+    );
+}
+
+#[test]
+fn filter_combines_gc_and_n_fraction_bounds_case_insensitively() {
+    let input =
+        TemporaryFile::new(b">low-gc\nATAT\n>match\naCgTN\n>high-gc\nGGGCCN\n>high-n\nNNNN\n");
+    let output = run_fasta_util(
+        &[
+            "filter",
+            input.path(),
+            "--min-gc",
+            "0.4",
+            "--max-gc",
+            "0.4",
+            "--max-n",
+            "0.2",
+        ],
+        b"",
+    );
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b">match\naCgTN\n");
+}
+
+#[test]
+fn filter_supports_protein_length_and_preserves_crlf_bytes() {
+    let input = TemporaryFile::new(b">short protein\r\nACDE\r\n>long protein\r\nACDEFGHIK\r\n");
+    let output = run_fasta_util(&["filter", input.path(), "--min-len", "5"], b"");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b">long protein\r\nACDEFGHIK\r\n");
+}
+
+#[test]
+fn filter_writes_selected_records_to_a_file() {
+    let input = TemporaryFile::new(b">short\nAC\n>long\nACGT\n");
+    let output_file = TemporaryFile::new(b"previous output");
+    let output = run_fasta_util(
+        &[
+            "filter",
+            input.path(),
+            "--min-len",
+            "3",
+            "--output",
+            output_file.path(),
+        ],
+        b"",
+    );
+
+    assert!(output.status.success());
+    assert!(output.stdout.is_empty());
+    assert_eq!(output_file.read(), b">long\nACGT\n");
+}
+
+#[test]
+fn filter_rejects_missing_or_contradictory_conditions() {
+    let input = TemporaryFile::new(b">record\nACGT\n");
+    let no_conditions = run_fasta_util(&["filter", input.path()], b"");
+    let reversed_length = run_fasta_util(
+        &["filter", input.path(), "--min-len", "5", "--max-len", "4"],
+        b"",
+    );
+    let reversed_gc = run_fasta_util(
+        &["filter", input.path(), "--min-gc", "0.8", "--max-gc", "0.2"],
+        b"",
+    );
+    let protein_gc = run_fasta_util(
+        &[
+            "filter",
+            input.path(),
+            "--sequence-type",
+            "protein",
+            "--max-gc",
+            "0.5",
+        ],
+        b"",
+    );
+    let auto_protein_gc_input = TemporaryFile::new(b">protein\nACDE\n");
+    let auto_protein_gc = run_fasta_util(
+        &["filter", auto_protein_gc_input.path(), "--max-gc", "0.5"],
+        b"",
+    );
+
+    for (output, message) in [
+        (no_conditions, "provide at least one filter option"),
+        (
+            reversed_length,
+            "--min-len cannot be greater than --max-len",
+        ),
+        (reversed_gc, "--min-gc cannot be greater than --max-gc"),
+        (
+            protein_gc,
+            "GC and N filters are only available for nucleotide sequences",
+        ),
+        (
+            auto_protein_gc,
+            "GC and N filters are only available for nucleotide sequences",
+        ),
+    ] {
+        assert!(!output.status.success());
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains(message),
+            "expected {message:?}, got {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(output.stdout.is_empty());
+    }
+}
+
+#[test]
+fn filter_rejects_out_of_range_fractions() {
+    let input = TemporaryFile::new(b">record\nACGT\n");
+    for fraction in ["-0.1", "1.1", "NaN", "inf"] {
+        let option = format!("--max-n={fraction}");
+        let output = run_fasta_util(&["filter", input.path(), &option], b"");
+
+        assert!(
+            !output.status.success(),
+            "fraction {fraction} unexpectedly passed"
+        );
+        assert!(String::from_utf8_lossy(&output.stderr).contains("fraction"));
+    }
+}
+
+#[test]
+fn filter_validation_failure_preserves_existing_output() {
+    let input = TemporaryFile::new(b">valid\nACGT\n>invalid\nAC?Z\n");
+    let output_file = TemporaryFile::new(b"keep this output");
+    let output = run_fasta_util(
+        &[
+            "filter",
+            input.path(),
+            "--min-len",
+            "2",
+            "--output",
+            output_file.path(),
+        ],
+        b"",
+    );
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("invalid nucleotide symbol '?'"));
+    assert_eq!(output_file.read(), b"keep this output");
+}
+
+#[test]
 fn get_extracts_requested_records_from_a_multi_fasta() {
     let input = TemporaryFile::new(b">chr1 description\nACGT\n>chr2\nTTAA\n>chr3 extra\nGGCC\n");
     let output = run_fasta_util(&["get", input.path(), "chr3", "chr1"], b"");
