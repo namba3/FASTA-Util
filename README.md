@@ -181,6 +181,24 @@ cargo bench --bench nucleic_acid
 cargo bench --bench nucleic_acid -- --input-size 100000 --sample-ms 500
 ```
 
+FASTAファイル走査の比較には、次のベンチマークを使います。LFとCRLFのmulti-FASTAを生成し、mmapのborrowed line visitor、mmap iterator、`BufReader::read_until`で走査したときのスループットを比較します。各方式の読み取った行数とバイト数を照合してから計測します。
+
+```sh
+cargo bench --bench fasta_io
+cargo bench --bench fasta_io -- --input-size 1000000 --sample-ms 300
+```
+
+既定では10,000塩基を使い、各方式を3回ウォームアップした後、200ミリ秒の測定を5回行います。`--input-size`は配列塩基数です。これはOSのページキャッシュに載った状態での反復走査を測るため、コールドディスク読み込みの速度は表しません。
+
+CLI処理のベンチマークでは、決定的な乱数から作ったmulti-FASTAを使い、`stats`・`filter`・`revcomp`のファイル入力と標準入力を比較します。さらに`filter | revcomp | stats`のパイプ全体を計測します。計測前にファイル入力と標準入力の出力一致を確認します。実行にはstable Rust、`hyperfine`、`awk`が必要です。既定では100万塩基を1回ウォームアップした後、各ケースを5回計測します。
+
+```sh
+./scripts/benchmark_pipeline.sh
+./scripts/benchmark_pipeline.sh 10000000 7
+```
+
+stdinケースでは入力の一時ファイル退避、パイプケースでは各プロセスの起動時間も計測値に含みます。スクリプトは実行ごとの一時ディレクトリに入力を作り、終了時に削除します。
+
 ## 実データのベンチマーク
 
 2026-10-04 に `dataset/ncbi_dataset` 内の RefSeq GRCh38.p14 FASTA を使って測定しました。全ゲノムの長さ計測には705レコードを含む `GCF_000001405.40_GRCh38.p14_genomic.fna`（3,339,739,109 bytes）を使い、配列切り出しにはその中の chr1（`NC_000001.11`、248,956,422塩基）を使いました。切り出し値は旧`slice`コマンドで測定した履歴値です。

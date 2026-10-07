@@ -1,11 +1,11 @@
-#[path = "../benches/support.rs"]
+#[path = "../benches/support/mod.rs"]
 mod support;
 
 use fasta_util::nucleic_acid::NUCLEIC_ACID_SET;
 use std::time::Duration;
 use support::{
     DEFAULT_INPUT_SIZE, DEFAULT_SAMPLE_MS, INVALID_BASES, mixed_sequence, parse_config,
-    repeated_bytes,
+    parse_config_for, repeated_bytes,
 };
 
 fn args(values: &[&str]) -> Vec<String> {
@@ -44,6 +44,16 @@ fn config_accepts_input_size_and_duration_overrides() {
 #[test]
 fn config_help_does_not_start_a_benchmark() {
     assert!(parse_config(args(&["--help"])).unwrap().is_none());
+}
+
+#[test]
+fn config_usage_names_the_selected_benchmark() {
+    let error = parse_config_for(args(&["--input-size", "0"]), "fasta_io")
+        .err()
+        .expect("zero input size should be rejected");
+
+    assert!(error.contains("cargo bench --bench fasta_io"));
+    assert!(error.contains("--input-size SIZE"));
 }
 
 #[test]

@@ -69,16 +69,17 @@ printf '\n%s\n' 'Full assembly length benchmark (1 warmup, 5 measured runs):'
     -n 'seqkit stats' "$q_seqkit stats $q_dataset" \
     -n 'fasta-util len' "$q_binary len -i $q_dataset"
 
-printf '\n%s\n' 'chr1 slice benchmarks (1 warmup, 5 measured runs):'
+printf '\n%s\n' 'chr1 get benchmarks (1 warmup, 5 measured runs):'
 while read -r name start length; do
-    end=$((start + length - 1))
-    fasta_command="$q_binary slice -i $q_chr1 --chars-per-line=60 --range ${start}..=${end}"
-    indexed_command="$q_binary slice -i $q_chr1 --fai-index $q_fai --chars-per-line=60 --range ${start}..=${end}"
+    range_start=$((start + 1))
+    range_end=$((start + length))
+    fasta_command="$q_binary get $q_chr1 ${range_start}-${range_end} --chars-per-line=60"
+    indexed_command="$q_binary get $q_chr1 ${range_start}-${range_end} --fai-index $q_fai --chars-per-line=60"
 
-    "$binary" slice -i "$chr1" --chars-per-line=60 --range "${start}..=${end}" > "$work_dir/fasta-util.out"
-    "$binary" slice -i "$chr1" --fai-index "$fai" --chars-per-line=60 --range "${start}..=${end}" > "$work_dir/fasta-util-indexed.out"
+    "$binary" get "$chr1" "${range_start}-${range_end}" --chars-per-line=60 > "$work_dir/fasta-util.out"
+    "$binary" get "$chr1" "${range_start}-${range_end}" --fai-index "$fai" --chars-per-line=60 > "$work_dir/fasta-util-indexed.out"
     if ! cmp -s "$work_dir/fasta-util.out" "$work_dir/fasta-util-indexed.out"; then
-        printf 'Output mismatch for slice case %s\n' "$name" >&2
+        printf 'Output mismatch for get case %s\n' "$name" >&2
         exit 1
     fi
     if [[ -n "$seqret" ]]; then
@@ -86,12 +87,12 @@ while read -r name start length; do
         seqret_end=$((start + length))
         "$seqret" -sequence "$chr1" -sbegin "$seqret_start" -send "$seqret_end" -auto -stdout > "$work_dir/seqret.out"
         if ! cmp -s "$work_dir/seqret.out" "$work_dir/fasta-util.out"; then
-            printf 'seqret output mismatch for slice case %s\n' "$name" >&2
+            printf 'seqret output mismatch for get case %s\n' "$name" >&2
             exit 1
         fi
     fi
 
-    printf '\n%s\n' "$name: offset=$start length=$length"
+    printf '\n%s\n' "$name: zero-based offset=$start length=$length (get uses 1-based coordinates)"
     hyperfine_args=(--shell=none --warmup 1 --runs 5 --style basic)
     if [[ -n "$seqret" ]]; then
         seqret_command="$(q "$seqret") -sequence $q_chr1 -sbegin $((start + 1)) -send $((start + length)) -auto -stdout"

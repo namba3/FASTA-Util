@@ -21,3 +21,7 @@ crossbeam = "0.8"
 [[bench]]
 name = "nucleic_acid"
 harness = false
+
+[[bench]]
+name = "fasta_io"
+harness = false

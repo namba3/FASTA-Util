@@ -181,6 +181,24 @@ Set the input size and duration of each sample with these options. The defaults 
 cargo bench --bench nucleic_acid -- --input-size 100000 --sample-ms 500
 ```
 
+Compare FASTA file-scanning paths with this benchmark. It generates LF and CRLF multi-FASTA inputs and measures an mmap borrowed-line visitor, the mmap line iterator, and `BufReader::read_until`. It checks that each path reads the same number of lines and bytes before timing.
+
+```sh
+cargo bench --bench fasta_io
+cargo bench --bench fasta_io -- --input-size 1000000 --sample-ms 300
+```
+
+The default is 10,000 sequence bases. Each method has three warmup scans followed by five 200 ms samples. `--input-size` counts sequence bases. Repeated scans measure data in the OS page cache, not cold-disk throughput.
+
+The CLI benchmark creates a deterministic random multi-FASTA and compares file and standard-input modes for `stats`, `filter`, and `revcomp`. It also measures the complete `filter | revcomp | stats` pipeline. Before timing, it checks that file and stdin modes produce identical output. Stable Rust, `hyperfine`, and `awk` are required. By default, it measures a 1-million-base input with one warmup and five runs per case.
+
+```sh
+./scripts/benchmark_pipeline.sh
+./scripts/benchmark_pipeline.sh 10000000 7
+```
+
+Stdin timings include staging the input in a temporary file; pipeline timings also include process startup. The script creates the input in a temporary directory and removes it on exit.
+
 ## Real-data benchmarks
 
 Measurements were taken on 2026-10-04 using the RefSeq GRCh38.p14 FASTA in `dataset/ncbi_dataset`. The full-genome length comparison used `GCF_000001405.40_GRCh38.p14_genomic.fna` (3,339,739,109 bytes), containing 705 records. Slice comparisons used its chromosome 1 record (`NC_000001.11`, 248,956,422 bases).

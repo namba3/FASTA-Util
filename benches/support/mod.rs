@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::time::Duration;
 
 pub const DEFAULT_INPUT_SIZE: usize = 10_000;
@@ -14,10 +16,25 @@ pub fn usage() -> &'static str {
      Defaults: --input-size 10000 --sample-ms 200"
 }
 
+pub fn usage_for(benchmark: &str) -> String {
+    format!(
+        "Usage: cargo bench --bench {benchmark} -- [--input-size SIZE] [--sample-ms MS]\n\
+         Defaults: --input-size {DEFAULT_INPUT_SIZE} --sample-ms {DEFAULT_SAMPLE_MS}"
+    )
+}
+
 pub fn parse_config<I>(args: I) -> Result<Option<Config>, String>
 where
     I: IntoIterator<Item = String>,
 {
+    parse_config_for(args, "nucleic_acid")
+}
+
+pub fn parse_config_for<I>(args: I, benchmark: &str) -> Result<Option<Config>, String>
+where
+    I: IntoIterator<Item = String>,
+{
+    let usage = usage_for(benchmark);
     let mut input_size = DEFAULT_INPUT_SIZE;
     let mut sample_ms = DEFAULT_SAMPLE_MS;
     let mut args = args.into_iter();
@@ -27,29 +44,29 @@ where
             "--input-size" => {
                 let value = args
                     .next()
-                    .ok_or_else(|| format!("missing value for {arg}\n{}", usage()))?;
+                    .ok_or_else(|| format!("missing value for {arg}\n{usage}"))?;
                 input_size = value
                     .parse()
-                    .map_err(|_| format!("invalid byte count '{value}' for {arg}\n{}", usage()))?;
+                    .map_err(|_| format!("invalid size '{value}' for {arg}\n{usage}"))?;
                 if input_size == 0 {
-                    return Err(format!("{arg} must be greater than zero\n{}", usage()));
+                    return Err(format!("{arg} must be greater than zero\n{usage}"));
                 }
             }
             "--sample-ms" => {
                 let value = args
                     .next()
-                    .ok_or_else(|| format!("missing value for {arg}\n{}", usage()))?;
+                    .ok_or_else(|| format!("missing value for {arg}\n{usage}"))?;
                 sample_ms = value
                     .parse()
-                    .map_err(|_| format!("invalid duration '{value}' for {arg}\n{}", usage()))?;
+                    .map_err(|_| format!("invalid duration '{value}' for {arg}\n{usage}"))?;
                 if sample_ms == 0 {
-                    return Err(format!("{arg} must be greater than zero\n{}", usage()));
+                    return Err(format!("{arg} must be greater than zero\n{usage}"));
                 }
             }
             // Cargo appends this flag when it launches a custom benchmark target.
             "--bench" => {}
             "-h" | "--help" => return Ok(None),
-            _ => return Err(format!("unknown argument '{arg}'\n{}", usage())),
+            _ => return Err(format!("unknown argument '{arg}'\n{usage}")),
         }
     }
 
