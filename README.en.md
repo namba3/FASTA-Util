@@ -209,6 +209,13 @@ The CLI benchmark creates a deterministic random multi-FASTA and compares file a
 
 Stdin timings include staging the input in a temporary file; pipeline timings also include process startup. The script creates the input in a temporary directory and removes it on exit.
 
+Compare how motif length and hit frequency affect `locate`, and how record count affects `stats`, with this script. The `stats` inputs have the same total number of bases, with about 100 or 10,000 bases per record. The `locate` input contains only A bases and measures near-match motifs of lengths 8, 32, and 64 with no exact hits, the 64-base motif with one mismatch allowed, and a frequent one-base motif. Before timing, the script checks file/stdin `stats` output and the expected `locate` hit counts. Stable Rust, `hyperfine`, and `awk` are required. Use at least 64 bases.
+
+```sh
+./scripts/benchmark_analysis.sh
+./scripts/benchmark_analysis.sh 10000000 7
+```
+
 ## Real-data benchmarks
 
 Measurements were taken on 2026-10-04 using the RefSeq GRCh38.p14 FASTA in `dataset/ncbi_dataset`. The full-genome length comparison used `GCF_000001405.40_GRCh38.p14_genomic.fna` (3,339,739,109 bytes), containing 705 records. Slice comparisons used its chromosome 1 record (`NC_000001.11`, 248,956,422 bases).

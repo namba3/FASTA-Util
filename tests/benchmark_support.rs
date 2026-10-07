@@ -2,7 +2,11 @@
 mod support;
 
 use fasta_util::nucleic_acid::NUCLEIC_ACID_SET;
-use std::time::Duration;
+use std::{
+    path::Path,
+    process::{Command, Output},
+    time::Duration,
+};
 use support::{
     DEFAULT_INPUT_SIZE, DEFAULT_SAMPLE_MS, INVALID_BASES, mixed_sequence, parse_config,
     parse_config_for, repeated_bytes,
@@ -10,6 +14,37 @@ use support::{
 
 fn args(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| (*value).to_owned()).collect()
+}
+
+fn run_analysis_benchmark(args: &[&str]) -> Output {
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/benchmark_analysis.sh");
+    Command::new(script)
+        .args(args)
+        .output()
+        .expect("failed to run analysis benchmark script")
+}
+
+#[test]
+fn analysis_benchmark_help_does_not_require_benchmark_dependencies() {
+    let output = run_analysis_benchmark(&["--help"]);
+
+    assert!(output.status.success());
+    let help = String::from_utf8_lossy(&output.stdout);
+    assert!(help.contains("Usage: benchmark_analysis.sh [BASES] [RUNS]"));
+    assert!(help.contains("BASES must be at least 64"));
+}
+
+#[test]
+fn analysis_benchmark_rejects_invalid_size_and_run_count() {
+    for args in [["63", "1"], ["1000", "0"], ["abc", "1"]] {
+        let output = run_analysis_benchmark(&args);
+
+        assert_eq!(output.status.code(), Some(2), "args: {args:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("BASES must be an integer"),
+            "args: {args:?}"
+        );
+    }
 }
 
 #[test]
