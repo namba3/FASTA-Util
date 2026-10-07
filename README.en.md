@@ -46,6 +46,20 @@ cargo run --manifest-path=generate_random_data/Cargo.toml -- 10000 --line-width 
 
 ## Sub Commands
 
+| Command | Purpose |
+| --- | --- |
+| [`len`](#len) | Count sequence symbols |
+| [`validate`](#validate) | Validate FASTA structure and sequence symbols |
+| [`index`](#index) | Create a `.fai` random-access index |
+| [`stats`](#stats) | Summarize lengths, N50, GC, and related metrics |
+| [`composition`](#composition) | Report sequence symbol frequencies |
+| [`get`](#get) | Retrieve records or sequence ranges |
+| [`filter`](#filter) | Select records by length, GC, or N fraction |
+| [`revcomp`](#revcomp) | Reverse-complement nucleotide sequences |
+| [`grep`](#grep) | Search records by header text |
+| [`locate`](#locate) | Find motif positions in sequences |
+| [`format`](#format) | Reformat line widths, letter case, gaps, and headers |
+
 Commands that produce sequence data write to standard output unless an output file is specified. `stats`, `composition`, `filter`, `revcomp`, `format`, and `validate` read standard input when their input path is omitted. For `get`, `grep`, and `locate`, pass `-` in the input position. `len` reads standard input by default and uses `-i` for file input. `index` requires a file input so it can determine where to write the `.fai` sidecar.
 
 ```sh
@@ -174,86 +188,19 @@ Stream through a FASTA file once and create a `.fai` index for random access. Th
 ./target/release/fasta-util get genome.fa 100000001-100001000
 ```
 
-## Simple tests and benchmarks
+## Benchmarks
 
-Run the nucleotide-check benchmark with:
-It measures four input patterns: all valid symbols, all invalid symbols, a 50% valid mix, and a 99% valid mix.
-Each implementation is measured for five 200 ms samples, and the median is reported.
-The implementation order rotates between samples to reduce order bias.
+The procedures and results measured on 2026-10-08 cover every subcommand, standard input and pipelines, a real genome, and internal Rust implementations in [`docs/benchmark-results.md`](docs/benchmark-results.md). CLI benchmarks use `hyperfine`, `awk`, and stable Rust; the default workload is 20 million bases, with one warmup and five measured runs per case.
 
 ```sh
+./scripts/benchmark_commands.sh
+./scripts/benchmark_commands.sh 50000000 7
 cargo bench --bench nucleic_acid
-```
-
-Set the input size and duration of each sample with these options. The defaults are 10,000 bytes and 200 ms.
-
-```sh
-cargo bench --bench nucleic_acid -- --input-size 100000 --sample-ms 500
-```
-
-Compare FASTA file-scanning paths with this benchmark. It generates LF and CRLF multi-FASTA inputs and measures an mmap borrowed-line visitor, the mmap line iterator, and `BufReader::read_until`. It checks that each path reads the same number of lines and bytes before timing.
-
-```sh
 cargo bench --bench fasta_io
-cargo bench --bench fasta_io -- --input-size 1000000 --sample-ms 300
-```
-
-The default is 10,000 sequence bases. Each method has three warmup scans followed by five 200 ms samples. `--input-size` counts sequence bases. Repeated scans measure data in the OS page cache, not cold-disk throughput.
-
-The CLI benchmark creates a deterministic random multi-FASTA and compares file and standard-input modes for `stats`, `filter`, and `revcomp`. It also measures the complete `filter | revcomp | stats` pipeline. Before timing, it checks that file and stdin modes produce identical output. Stable Rust, `hyperfine`, and `awk` are required. By default, it measures a 1-million-base input with one warmup and five runs per case.
-
-```sh
-./scripts/benchmark_pipeline.sh
-./scripts/benchmark_pipeline.sh 10000000 7
-```
-
-Stdin timings include staging the input in a temporary file; pipeline timings also include process startup. The script creates the input in a temporary directory and removes it on exit.
-
-Compare how motif length and hit frequency affect `locate`, and how record count affects `stats`, with this script. The `stats` inputs have the same total number of bases, with about 100 or 10,000 bases per record. The `locate` input contains only A bases and measures near-match motifs of lengths 8, 32, 64, 128, and 512 with no exact hits, a 64-base motif with one mismatch allowed, 64- and 512-base motifs with two mismatches allowed, and a frequent one-base motif. Before timing, the script checks file/stdin `stats` output and the expected `locate` hit counts. Stable Rust, `hyperfine`, and `awk` are required. Use at least 64 bases.
-
-```sh
-./scripts/benchmark_analysis.sh
-./scripts/benchmark_analysis.sh 10000000 7
-```
-
-## Real-data benchmarks
-
-Measurements were taken on 2026-10-04 using the RefSeq GRCh38.p14 FASTA in `dataset/ncbi_dataset`. The full-genome length comparison used `GCF_000001405.40_GRCh38.p14_genomic.fna` (3,339,739,109 bytes), containing 705 records. Slice comparisons used its chromosome 1 record (`NC_000001.11`, 248,956,422 bases).
-
-The benchmark used the source FASTA directly and preserved its lowercase soft-masked sequence. Before timing each case, regular and `.fai` indexed outputs were verified byte-for-byte. If `seqret` is installed, its output is also verified and included in the comparison. The extraction timings are historical values measured with the former `slice` command.
-
-The regular and `.fai` paths were remeasured by the benchmark script on 2026-10-04 using the same CPU, OS, stable Rust, and hyperfine setup. Their outputs were compared byte-for-byte before five timed runs. `seqret` was unavailable during this remeasurement, so only its values in the table are from the earlier run. Hyperfine reported a statistical outlier for the regular path extracting 100,000 bases from the middle; that result has high variance.
-
-Remeasurement environment: Ubuntu 26.04.1 LTS (WSL2), AMD Ryzen 9 9900X, stable Rust 1.99.0, seqkit 2.10.1, and hyperfine 1.20.0. The seqret values in the table are from the earlier run using EMBOSS seqret 6.6.0.0. Each command had one warmup followed by five measured runs. Tables show the mean and standard deviation. Results vary with the machine and file-cache state.
-
-### len
-
-`seqkit stats` computes statistics for all 705 records; this tool counts sequence symbols. Their total lengths matched.
-
-| Command | Result | Time (mean ± standard deviation) |
-| --- | ---: | ---: |
-| `seqkit stats` | 3,298,430,636 bases, 705 records | 2,987 ± 247 ms |
-| `fasta-util len` | 3,298,430,636 bases | 3,097 ± 487 ms |
-
-### get
-
-Ranges are positions within chromosome 1. The former `slice` command used zero-based inclusive ranges. The current `get` command expresses the same regions with 1-based inclusive `START-END` coordinates. Output was wrapped at 60 bases per line.
-
-| Offset | Slice length | seqret (mean ± standard deviation) | fasta-util (regular, mean ± standard deviation) | fasta-util (FAI, mean ± standard deviation) |
-| ---: | ---: | ---: | ---: | ---: |
-| 100,000,000 | 100,000,000 | 843 ± 46 ms | 245.8 ± 32.2 ms | 117.9 ± 22.0 ms |
-| 100,000,000 | 100,000 | 745 ± 39 ms | 146.3 ± 33.3 ms | 1.7 ± 0.2 ms |
-| 100,000,000 | 100 | 731 ± 113 ms | 130.4 ± 22.8 ms | 1.7 ± 0.2 ms |
-| 0 | 100,000,000 | 866 ± 43 ms | 117.6 ± 12.4 ms | 70.3 ± 5.2 ms |
-| 0 | 100,000 | 769 ± 113 ms | 1.7 ± 0.1 ms | 1.7 ± 0.3 ms |
-| 0 | 100 | 618 ± 137 ms | 1.6 ± 0.1 ms | 1.5 ± 0.1 ms |
-
-To reproduce these measurements, install `awk`, `seqkit`, `hyperfine`, and stable Rust, then run this script from the repository root. `seqret` is optional and adds an external-tool comparison when installed. An alternate FASTA path can be supplied as the first argument.
-
-```sh
 ./scripts/benchmark_real_data.sh
-./scripts/benchmark_real_data.sh path/to/genomic.fna
 ```
+
+Results vary with the CPU, OS, file-cache state, and system load. Process startup time contributes to short command timings.
 
 ## License
 
