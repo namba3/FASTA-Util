@@ -1,5 +1,5 @@
 use crate::{
-    LocateArgs, ensure_distinct_input_output, for_each_reader_line, is_nucleic_acid, line_error,
+    LocateArgs, ensure_distinct_input_output, for_each_reader_line, line_error,
     output::with_output, read_lines_from_file, strip_line_ending,
 };
 use fasta_util::LinesInFile;
@@ -180,13 +180,12 @@ impl<'a, W: Write> LocateScanner<'a, W> {
                     &format!("whitespace in sequence at column {}", column + 1),
                 ));
             }
-            if !is_nucleic_acid(byte) {
+            let Some(mask) = iupac_mask(byte) else {
                 return Err(line_error(
                     line_number,
                     &format!("invalid nucleotide '{}'", char::from(byte)),
                 ));
-            }
-            let mask = iupac_mask(byte).expect("validated nucleotide must have an IUPAC mask");
+            };
             self.position = self
                 .position
                 .checked_add(1)
@@ -382,6 +381,7 @@ fn complement_mask(mask: u8) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::{BitParallelMatcher, complement_mask, iupac_mask, window_matches};
+    use crate::is_nucleic_acid;
     use std::collections::VecDeque;
 
     #[test]
@@ -399,6 +399,17 @@ mod tests {
                 0b0011, 0b1110, 0b1101, 0b1011, 0b0111, 0b1111, 0b1_0000,
             ]
         );
+    }
+
+    #[test]
+    fn iupac_mask_coverage_matches_the_nucleotide_validator() {
+        for byte in 0..=u8::MAX {
+            assert_eq!(
+                iupac_mask(byte).is_some(),
+                is_nucleic_acid(byte),
+                "byte {byte}"
+            );
+        }
     }
 
     #[test]
