@@ -767,6 +767,55 @@ fn remaining_fasta_commands_accept_standard_input_with_dash_or_omitted_path() {
 }
 
 #[test]
+fn get_reads_record_regions_and_global_ranges_from_standard_input() {
+    let fasta = b">first description\nACGT\n>second description\nTGCA\n";
+
+    let record_region = run_fasta_util(&["get", "-", "first:2-4"], fasta);
+    assert!(record_region.status.success());
+    assert_eq!(record_region.stdout, b">first:2-4\nCGT\n");
+
+    let global_range = run_fasta_util(&["get", "-", "3-6"], fasta);
+    assert!(global_range.status.success());
+    assert_eq!(
+        global_range.stdout,
+        b">first description\nGT\n>second description\nTG\n"
+    );
+}
+
+#[test]
+fn stdin_inputs_support_file_outputs_and_validation_diagnostics_name_stdin() {
+    let output_file = TemporaryFile::new(b"old contents");
+    let formatted = run_fasta_util(
+        &["format", "--uppercase", "--output", output_file.path()],
+        b">record\r\nacgt\r\n",
+    );
+    assert!(formatted.status.success());
+    assert!(formatted.stdout.is_empty());
+    assert_eq!(output_file.read(), b">record\nACGT\n");
+
+    let valid = run_fasta_util(&["validate"], b">record\nACGT\n");
+    assert!(valid.status.success());
+    assert!(valid.stderr.is_empty());
+
+    let invalid = run_fasta_util(&["validate", "-"], b">record\nACZ\n");
+    assert!(!invalid.status.success());
+    assert!(String::from_utf8_lossy(&invalid.stderr).contains("stdin:2:3"));
+    assert!(String::from_utf8_lossy(&invalid.stderr).contains("invalid nucleotide 'Z'"));
+}
+
+#[test]
+fn stdin_filter_failure_does_not_write_partial_fasta_to_stdout() {
+    let output = run_fasta_util(
+        &["filter", "--min-len", "1"],
+        b">valid\nACGT\n>invalid\nAC?\n",
+    );
+
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("invalid nucleotide symbol"));
+}
+
+#[test]
 fn revcomp_complements_iupac_symbols_and_preserves_case() {
     let input = TemporaryFile::new(b">upper\nACGTRYKMBVDHSWN-\n>lower\nacgtrykmbvdhswn-\n");
     let output = run_fasta_util(&["revcomp", input.path(), "--chars-per-line", "8"], b"");

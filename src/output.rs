@@ -1,6 +1,6 @@
 use std::{
     fs::{self, File, OpenOptions, Permissions},
-    io::{self, Write},
+    io::{self, Read, Write},
     path::{Path, PathBuf},
     sync::atomic::{AtomicUsize, Ordering},
 };
@@ -40,10 +40,14 @@ struct TemporaryInput {
 
 impl TemporaryInput {
     fn from_stdin() -> io::Result<Self> {
+        let mut stdin = io::stdin().lock();
+        Self::from_reader_in(&std::env::temp_dir(), &mut stdin)
+    }
+
+    fn from_reader_in(directory: &Path, reader: &mut impl Read) -> io::Result<Self> {
         loop {
             let id = NEXT_TEMP_INPUT_ID.fetch_add(1, Ordering::Relaxed);
-            let path = std::env::temp_dir()
-                .join(format!(".fasta-util-input-{}-{id}.tmp", std::process::id()));
+            let path = directory.join(format!(".fasta-util-input-{}-{id}.tmp", std::process::id()));
             let mut options = OpenOptions::new();
             options.write(true).create_new(true);
             #[cfg(unix)]
@@ -54,8 +58,7 @@ impl TemporaryInput {
             match options.open(&path) {
                 Ok(mut file) => {
                     let temporary = Self { path };
-                    let mut stdin = io::stdin().lock();
-                    io::copy(&mut stdin, &mut file)?;
+                    io::copy(reader, &mut file)?;
                     file.flush()?;
                     drop(file);
                     return Ok(temporary);
@@ -163,10 +166,10 @@ impl Drop for TemporaryOutput {
 
 #[cfg(test)]
 mod tests {
-    use super::TemporaryOutput;
+    use super::{TemporaryInput, TemporaryOutput};
     use std::{
         fs,
-        io::Write,
+        io::{self, Cursor, Read, Write},
         path::PathBuf,
         sync::atomic::{AtomicUsize, Ordering},
     };
@@ -205,6 +208,48 @@ mod tests {
     fn write_temporary_output(output: &mut TemporaryOutput, contents: &[u8]) {
         let mut file = output.take_file().unwrap();
         file.write_all(contents).unwrap();
+    }
+
+    #[test]
+    fn temporary_stdin_copy_preserves_bytes_and_removes_file_on_drop() {
+        let directory = TemporaryDirectory::new();
+        let contents = b">record\r\nACGT\n\0tail";
+        let mut reader = Cursor::new(contents);
+        let temporary = TemporaryInput::from_reader_in(&directory.0, &mut reader).unwrap();
+        let path = temporary.path.clone();
+
+        assert_eq!(fs::read(&path).unwrap(), contents);
+        drop(temporary);
+
+        assert!(!path.exists());
+        assert_eq!(fs::read_dir(&directory.0).unwrap().count(), 0);
+    }
+
+    struct FailingReader(bool);
+
+    impl Read for FailingReader {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            if !self.0 {
+                self.0 = true;
+                buffer[..7].copy_from_slice(b"partial");
+                return Ok(7);
+            }
+            Err(io::Error::other("simulated stdin read failure"))
+        }
+    }
+
+    #[test]
+    fn failed_stdin_copy_removes_partial_temporary_file() {
+        let directory = TemporaryDirectory::new();
+        let mut reader = FailingReader(false);
+
+        let error = match TemporaryInput::from_reader_in(&directory.0, &mut reader) {
+            Ok(_) => panic!("stdin copy unexpectedly succeeded"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.to_string(), "simulated stdin read failure");
+        assert_eq!(fs::read_dir(&directory.0).unwrap().count(), 0);
     }
 
     #[test]
