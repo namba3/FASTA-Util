@@ -237,27 +237,31 @@ impl<'a, W: Write> LocateScanner<'a, W> {
 
 struct BitParallelMatcher {
     forward: ShiftAndState,
-    reverse: ShiftAndState,
+    reverse: Option<ShiftAndState>,
 }
 
 impl BitParallelMatcher {
     fn new(forward_pattern: &[u8], reverse_pattern: &[u8]) -> Self {
         Self {
             forward: ShiftAndState::new(forward_pattern),
-            reverse: ShiftAndState::new(reverse_pattern),
+            reverse: (forward_pattern != reverse_pattern)
+                .then(|| ShiftAndState::new(reverse_pattern)),
         }
     }
 
     fn reset(&mut self) {
         self.forward.reset();
-        self.reverse.reset();
+        if let Some(reverse) = &mut self.reverse {
+            reverse.reset();
+        }
     }
 
     fn advance(&mut self, sequence_mask: u8, max_mismatch: usize) -> (bool, bool) {
-        (
-            self.forward.advance(sequence_mask, max_mismatch),
-            self.reverse.advance(sequence_mask, max_mismatch),
-        )
+        let forward = self.forward.advance(sequence_mask, max_mismatch);
+        let reverse = self.reverse.as_mut().map_or(forward, |matcher| {
+            matcher.advance(sequence_mask, max_mismatch)
+        });
+        (forward, reverse)
     }
 }
 
@@ -430,6 +434,8 @@ mod tests {
     fn bit_parallel_matching_agrees_with_window_matching_for_iupac_masks() {
         let patterns = [
             vec![0b0001],
+            vec![0b0001, 0b1000],
+            vec![0b0101, 0b1010],
             vec![0b0001, 0b0010, 0b0100],
             vec![0b0101, 0b1111, 0b1010, 0b1_0000],
             vec![0b0001; 64],
