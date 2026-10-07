@@ -823,6 +823,126 @@ fn grep_rejects_empty_pattern_and_data_before_first_record() {
 }
 
 #[test]
+fn format_wraps_sequences_and_normalizes_line_endings() {
+    let input = TemporaryFile::new(b">first description\r\nACG\r\nTTA\n>second\nCCGGTT\n");
+    let output = run_fasta_util(&["format", "--width", "4", input.path()], b"");
+
+    assert!(output.status.success());
+    assert_eq!(
+        output.stdout,
+        b">first description\nACGT\nTA\n>second\nCCGG\nTT\n"
+    );
+}
+
+#[test]
+fn format_width_zero_writes_one_sequence_line_per_record() {
+    let input = TemporaryFile::new(b">first\nAC\nGT\n>second\nTT\nAA\n");
+    let output = run_fasta_util(&["format", "--width", "0", input.path()], b"");
+
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b">first\nACGT\n>second\nTTAA\n");
+}
+
+#[test]
+fn format_changes_sequence_case_removes_gaps_and_trims_headers() {
+    let input = TemporaryFile::new(b">  first description  \r\nac-g\r\nTt-a\n> second \nN--\n");
+    let uppercase = run_fasta_util(
+        &[
+            "format",
+            input.path(),
+            "--width",
+            "0",
+            "--uppercase",
+            "--remove-gaps",
+            "--trim-header",
+        ],
+        b"",
+    );
+    let lowercase = run_fasta_util(&["format", input.path(), "--lowercase"], b"");
+
+    assert!(uppercase.status.success());
+    assert_eq!(
+        uppercase.stdout,
+        b">first description\nACGTTA\n>second\nN\n"
+    );
+    assert!(lowercase.status.success());
+    assert_eq!(
+        lowercase.stdout,
+        b">  first description  \nac-gtt-a\n> second \nn--\n"
+    );
+}
+
+#[test]
+fn format_keeps_empty_records_and_emits_no_empty_sequence_lines() {
+    let input = TemporaryFile::new(b">empty\n>gaps\n---\n>sequence\nA-C\n");
+    let output = run_fasta_util(
+        &["format", input.path(), "--remove-gaps", "--width", "0"],
+        b"",
+    );
+
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b">empty\n>gaps\n>sequence\nAC\n");
+}
+
+#[test]
+fn format_writes_to_a_file_and_rejects_using_input_as_output() {
+    let input = TemporaryFile::new(b">record\nACGT\n");
+    let output_file = TemporaryFile::new(b"previous output");
+    let output = run_fasta_util(
+        &[
+            "format",
+            input.path(),
+            "--width",
+            "2",
+            "--output",
+            output_file.path(),
+        ],
+        b"",
+    );
+    let same_file = run_fasta_util(&["format", input.path(), "--output", input.path()], b"");
+
+    assert!(output.status.success());
+    assert!(output.stdout.is_empty());
+    assert_eq!(output_file.read(), b">record\nAC\nGT\n");
+    assert!(!same_file.status.success());
+    assert_eq!(input.read(), b">record\nACGT\n");
+}
+
+#[test]
+fn format_rejects_invalid_structure_without_replacing_output() {
+    let input = TemporaryFile::new(b">valid\nACGT\n>invalid\nAC GT\n");
+    let output_file = TemporaryFile::new(b"keep this output");
+    let output = run_fasta_util(
+        &["format", input.path(), "--output", output_file.path()],
+        b"",
+    );
+    let before_header = TemporaryFile::new(b"ACGT\n>record\nACGT\n");
+    let before_header_output = run_fasta_util(&["format", before_header.path()], b"");
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("whitespace in sequence"));
+    assert_eq!(output_file.read(), b"keep this output");
+    assert!(!before_header_output.status.success());
+    assert!(
+        String::from_utf8_lossy(&before_header_output.stderr)
+            .contains("sequence data appears before")
+    );
+    assert!(before_header_output.stdout.is_empty());
+}
+
+#[test]
+fn format_rejects_conflicting_case_options_and_empty_ids() {
+    let input = TemporaryFile::new(b">record\nACGT\n");
+    let conflict = run_fasta_util(&["format", input.path(), "--uppercase", "--lowercase"], b"");
+    let empty_id_input = TemporaryFile::new(b">  \nACGT\n");
+    let empty_id = run_fasta_util(&["format", empty_id_input.path()], b"");
+
+    assert!(!conflict.status.success());
+    assert!(!empty_id.status.success());
+    assert!(String::from_utf8_lossy(&empty_id.stderr).contains("record identifier is empty"));
+}
+
+#[test]
 fn locate_reports_one_based_inclusive_coordinates_on_both_strands() {
     let input = TemporaryFile::new(b">chr1 description\nAAATA\nAAGG\n>chr3\nCTTTA\nTTG\n");
     let output = run_fasta_util(&["locate", input.path(), "AATAAA"], b"");

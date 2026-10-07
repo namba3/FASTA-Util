@@ -103,6 +103,16 @@ Search record headers for literal text and print each matching FASTA record in i
 ./target/release/fasta-util grep seq.fa brca --ignore-case
 ```
 
+### format
+
+Normalize FASTA line endings to LF and wrap sequences to the requested width. The default width is 60. `--width 0` writes each record's sequence on one line. Use `--uppercase` or `--lowercase` to change sequence letter case, `--remove-gaps` to remove `-`, and `--trim-header` to trim surrounding ASCII whitespace after `>`. Output goes to standard output unless a file is specified.
+
+```sh
+./target/release/fasta-util format --width 80 seq.fa > formatted.fa
+./target/release/fasta-util format --width 0 seq.fa
+./target/release/fasta-util format --uppercase --remove-gaps --trim-header seq.fa
+```
+
 ### locate
 
 Search nucleotide sequences on both strands and print tab-separated `ID`, start, end, and strand columns. Coordinates are 1-based and inclusive. Motifs accept IUPAC nucleotide symbols, and overlapping matches are reported. Set `--max-mismatch` to allow substitutions. Matches in the input orientation use `+`; matches to the reverse complement use `-`. At ambiguous sequence positions, a match is reported when the possible-base sets intersect at every position.

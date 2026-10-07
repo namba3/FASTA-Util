@@ -1,5 +1,6 @@
 mod fasta_index;
 mod filter;
+mod format;
 mod get;
 mod grep;
 mod locate;
@@ -47,6 +48,8 @@ enum SubCommand {
     Grep(GrepArgs),
     #[command(about = "Locate IUPAC nucleotide motifs in FASTA sequences")]
     Locate(LocateArgs),
+    #[command(about = "Reformat FASTA records and sequence lines")]
+    Format(FormatArgs),
 }
 
 #[derive(Parser)]
@@ -202,6 +205,36 @@ struct LocateArgs {
     output: Option<PathBuf>,
 }
 
+#[derive(Parser)]
+struct FormatArgs {
+    /// FASTA file to format
+    input: PathBuf,
+
+    /// Sequence characters per line; 0 writes one sequence line per record
+    #[arg(long, default_value_t = 60)]
+    width: usize,
+
+    /// Convert sequence symbols to uppercase
+    #[arg(long, conflicts_with = "lowercase")]
+    uppercase: bool,
+
+    /// Convert sequence symbols to lowercase
+    #[arg(long, conflicts_with = "uppercase")]
+    lowercase: bool,
+
+    /// Remove gap symbols (-) from sequences
+    #[arg(long)]
+    remove_gaps: bool,
+
+    /// Trim surrounding ASCII whitespace from header text
+    #[arg(long)]
+    trim_header: bool,
+
+    /// Write output to a file instead of standard output
+    #[arg(short, long)]
+    output: Option<PathBuf>,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
 enum StatsFormat {
     #[default]
@@ -276,6 +309,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         SubCommand::Revcomp(args) => revcomp::run(args)?,
         SubCommand::Grep(args) => grep::run(args)?,
         SubCommand::Locate(args) => locate::run(args)?,
+        SubCommand::Format(args) => format::run(args)?,
     }
 
     Ok(())

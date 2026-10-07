@@ -103,6 +103,16 @@ FASTAヘッダーに含まれる文字列でレコードを検索し、一致し
 ./target/release/fasta-util grep seq.fa brca --ignore-case
 ```
 
+### format
+
+FASTAの改行をLFに統一し、配列行を指定幅で折り返します。既定の幅は60です。`--width 0`は各レコードの配列を1行にまとめます。`--uppercase`または`--lowercase`で配列記号の大文字・小文字を変更でき、`--remove-gaps`で`-`を除去します。`--trim-header`は`>`の後のヘッダー文字列の前後にあるASCII空白を除去します。出力先を指定しない場合は標準出力に書きます。
+
+```sh
+./target/release/fasta-util format --width 80 seq.fa > formatted.fa
+./target/release/fasta-util format --width 0 seq.fa
+./target/release/fasta-util format --uppercase --remove-gaps --trim-header seq.fa
+```
+
 ### locate
 
 核酸配列内のモチーフを両鎖から検索し、タブ区切りで`ID・開始・終了・strand`を出力します。座標は1始まり・両端包含です。検索語はIUPAC塩基記号に対応し、重複する位置も報告します。`--max-mismatch`で許容する不一致数を指定できます。逆相補配列と一致する位置は`-`、入力配列の向きで一致する位置は`+`です。曖昧塩基を含む配列では、各位置の塩基集合がモチーフの集合と重なる場合に一致とみなします。
