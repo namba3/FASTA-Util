@@ -205,6 +205,93 @@ fn len_accepts_a_non_utf8_input_path() {
 }
 
 #[test]
+fn len_counts_protein_symbols_from_stdin() {
+    let output = run_fasta_util(
+        &["len", "--sequence-type", "protein"],
+        b">protein\nACDEFGHIKL\nMNPQRSTVWY\nBZJXUO*-\n",
+    );
+
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"28\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn slice_handles_protein_symbols_and_preserves_case() {
+    let output = run_fasta_util(
+        &[
+            "slice",
+            "--sequence-type",
+            "protein",
+            "--range",
+            "2..=8",
+            "--chars-per-line",
+            "4",
+        ],
+        b">protein\nacDEFGHIK*\n",
+    );
+
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b">protein\nDEFG\nHIK\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn indexed_protein_slice_matches_streaming_slice() {
+    let input = TemporaryFile::new(b">protein description\nACDE\nBZJU\nOX*-\n");
+    let index = TemporaryFile::new(b"protein\t12\t21\t4\t5\n");
+    let args = [
+        "slice",
+        "--sequence-type",
+        "protein",
+        "--input",
+        input.path(),
+        "--range",
+        "2..=10",
+        "--chars-per-line",
+        "4",
+    ];
+    let normal = run_fasta_util(&args, b"");
+    let indexed = run_fasta_util(
+        &[
+            "slice",
+            "--sequence-type",
+            "protein",
+            "--input",
+            input.path(),
+            "--fai-index",
+            index.path(),
+            "--range",
+            "2..=10",
+            "--chars-per-line",
+            "4",
+        ],
+        b"",
+    );
+
+    assert!(
+        normal.status.success(),
+        "{}",
+        String::from_utf8_lossy(&normal.stderr)
+    );
+    assert!(
+        indexed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&indexed.stderr)
+    );
+    assert_eq!(indexed.stdout, normal.stdout);
+    assert_eq!(normal.stdout, b">protein description\nDEBZ\nJUOX\n*\n");
+}
+
+#[test]
+fn protein_mode_rejects_non_protein_symbols() {
+    let output = run_fasta_util(&["len", "--sequence-type", "protein"], b">protein\nAC.D\n");
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("invalid protein symbol"));
+}
+
+#[test]
 fn slice_writes_selected_sequence_from_stdin() {
     let output = run_fasta_util(
         &["slice", "--range", "2..=4", "--chars-per-line", "2"],

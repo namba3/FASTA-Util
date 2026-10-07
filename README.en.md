@@ -8,7 +8,7 @@ A CLI tool for playing with FASTA files
 
 FASTA is a text format for nucleotide or amino acid sequences. Each record starts with a header line beginning with `>`, followed by one or more sequence lines. Sequence data can wrap across multiple lines.
 
-This tool currently processes nucleotide FASTA files. Amino acid sequences are not supported.
+`len` and `slice` process nucleotide sequences by default. To process protein sequences, pass `--sequence-type protein`. Each invocation must process a single sequence type across all records; the tool does not infer it from FASTA contents.
 
 ```fasta
 >record-1 optional description
@@ -18,7 +18,9 @@ UKS-
 MRY
 ```
 
-`len` counts sequence symbols, excluding headers and blank lines. `slice` positions also count only sequence symbols, excluding headers and line breaks. For multiple records, the range indexes the sequences concatenated in file order. Headers encountered before the range ends are preserved, so the output may include a header for a record that contributes no symbols to the selected range. This tool accepts uppercase and lowercase `ACGTNUKSYMWRBDHV` symbols and `-` for a gap. `slice` preserves the original letter case. Other symbols are rejected.
+`len` counts sequence symbols, excluding headers and blank lines. `slice` positions also count only sequence symbols, excluding headers and line breaks. For multiple records, the range indexes the sequences concatenated in file order. Headers encountered before the range ends are preserved, so the output may include a header for a record that contributes no symbols to the selected range.
+
+Nucleotide sequences accept uppercase and lowercase `ACGTNUKSYMWRBDHV` symbols and `-` for a gap. Protein sequences accept uppercase and lowercase symbols for the 20 standard amino acids, plus `B J O U X Z`, the stop marker `*`, and the gap symbol `-`. `slice` preserves the original letter case in both modes. Other symbols are rejected.
 
 Do not modify an input file while running `len` or non-indexed `slice` against it. While running indexed `slice`, do not modify either the FASTA input or its `.fai` index.
 
@@ -50,6 +52,7 @@ Count the total length of the sequence
 
 ```sh
 ./target/release/fasta-util len -i test.fna
+./target/release/fasta-util len --sequence-type protein -i proteins.faa
 ```
 
 ```txt
@@ -68,6 +71,7 @@ For a slice from the middle of a large uncompressed FASTA, pass a matching `.fai
 
 ```sh
 ./target/release/fasta-util slice -i test.fna --range 99..=199
+./target/release/fasta-util slice --sequence-type protein -i proteins.faa --range 99..=199
 samtools faidx test.fna
 ./target/release/fasta-util slice -i test.fna --fai-index test.fna.fai --range 100000000..100000100
 ```

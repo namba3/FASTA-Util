@@ -1,4 +1,4 @@
-use crate::{strip_line_ending, validated_sequence};
+use crate::{SequenceType, strip_line_ending, validated_sequence_for};
 use std::{
     fs::File,
     io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write},
@@ -16,12 +16,19 @@ struct FaiRecord {
     line_width: usize,
 }
 
+#[derive(Clone, Copy)]
+struct SequenceOutputOptions {
+    chars_per_line: usize,
+    sequence_type: SequenceType,
+}
+
 pub(super) fn write_slice<W: Write>(
     input_path: &Path,
     index_path: &Path,
     start: usize,
     end_exclusive: Option<usize>,
     chars_per_line: usize,
+    sequence_type: SequenceType,
     writer: &mut W,
 ) -> io::Result<()> {
     let records = read_index(index_path)?;
@@ -29,6 +36,10 @@ pub(super) fn write_slice<W: Write>(
     let file_length = input.metadata()?.len();
     let total_length = validate_index_bounds(&records, file_length)?;
     let range_end = end_exclusive.unwrap_or(total_length).min(total_length);
+    let sequence_options = SequenceOutputOptions {
+        chars_per_line,
+        sequence_type,
+    };
     let mut record_start = 0usize;
     let mut written = 0usize;
 
@@ -49,7 +60,7 @@ pub(super) fn write_slice<W: Write>(
                 record,
                 selected_start - record_start,
                 selected_end - record_start,
-                chars_per_line,
+                sequence_options,
                 &mut written,
                 writer,
             )?;
@@ -262,7 +273,7 @@ fn write_sequence_range<W: Write>(
     record: &FaiRecord,
     start: usize,
     end: usize,
-    chars_per_line: usize,
+    options: SequenceOutputOptions,
     written: &mut usize,
     writer: &mut W,
 ) -> io::Result<()> {
@@ -335,14 +346,14 @@ fn write_sequence_range<W: Write>(
             }
         }
         raw.truncate(count);
-        let bases = validated_sequence(&raw)?;
+        let bases = validated_sequence_for(&raw, options.sequence_type)?;
         if bases.len() != count {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "FAI sequence layout does not match the input FASTA",
             ));
         }
-        write_wrapped_bases(writer, bases, chars_per_line, written)?;
+        write_wrapped_bases(writer, bases, options.chars_per_line, written)?;
         position += count;
     }
     Ok(())

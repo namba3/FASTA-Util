@@ -1,9 +1,11 @@
 mod fasta_index;
 mod output;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use crossbeam::channel::{Receiver, bounded};
-use fasta_util::{LinesInFile, is_nucleic_acid, read_lines_from_file, read_lines_from_stdin};
+use fasta_util::{
+    LinesInFile, is_amino_acid, is_nucleic_acid, read_lines_from_file, read_lines_from_stdin,
+};
 use output::TemporaryOutput;
 use std::{
     io::{self, BufWriter, Write},
@@ -35,6 +37,14 @@ struct LenArgs {
         help = "Specify input file\nIf omitted, read from standard input"
     )]
     input: Option<PathBuf>,
+
+    #[arg(
+        long,
+        value_enum,
+        default_value_t = SequenceType::Nucleotide,
+        help = "Sequence alphabet to validate (nucleotide or protein)"
+    )]
+    sequence_type: SequenceType,
 }
 
 #[derive(Parser)]
@@ -45,6 +55,14 @@ struct SliceArgs {
         help = "Specify input file\nIf omitted, read from standard input"
     )]
     input: Option<PathBuf>,
+
+    #[arg(
+        long,
+        value_enum,
+        default_value_t = SequenceType::Nucleotide,
+        help = "Sequence alphabet to validate (nucleotide or protein)"
+    )]
+    sequence_type: SequenceType,
 
     #[arg(
         short,
@@ -75,6 +93,13 @@ struct SliceArgs {
     chars_per_line: usize,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
+pub(crate) enum SequenceType {
+    #[default]
+    Nucleotide,
+    Protein,
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
@@ -103,9 +128,9 @@ fn len(args: LenArgs) -> Result<(), Box<dyn std::error::Error>> {
             // SAFETY: Input files must remain unchanged for the duration of this command;
             // this command only reads the file and never modifies it.
             let lines = unsafe { read_lines_from_file(input)? };
-            count_sequence_bases_from_file(&lines)?
+            count_sequence_bases_from_file(&lines, args.sequence_type)?
         }
-        None => count_sequence_bases(read_lines_from_stdin())?,
+        None => count_sequence_bases_for(read_lines_from_stdin(), args.sequence_type)?,
     };
 
     let stdout = io::stdout();
@@ -118,12 +143,30 @@ fn write_length(writer: &mut impl Write, length: u64) -> io::Result<()> {
     writeln!(writer, "{length}")
 }
 
+#[cfg(test)]
 fn validated_sequence(line: &[u8]) -> io::Result<&[u8]> {
+    validated_sequence_for(line, SequenceType::Nucleotide)
+}
+
+pub(crate) fn validated_sequence_for(
+    line: &[u8],
+    sequence_type: SequenceType,
+) -> io::Result<&[u8]> {
     let sequence = line.trim_ascii_start().trim_ascii_end();
-    if let Some(byte) = sequence.iter().find(|byte| !is_nucleic_acid(**byte)) {
-        return Err(invalid_nucleic_acid(*byte));
+    if let Some(byte) = sequence
+        .iter()
+        .find(|byte| !is_sequence_symbol(**byte, sequence_type))
+    {
+        return Err(invalid_sequence_symbol(*byte, sequence_type));
     }
     Ok(sequence)
+}
+
+fn is_sequence_symbol(byte: u8, sequence_type: SequenceType) -> bool {
+    match sequence_type {
+        SequenceType::Nucleotide => is_nucleic_acid(byte),
+        SequenceType::Protein => is_amino_acid(byte),
+    }
 }
 
 fn with_line_context(line_number: usize, error: io::Error) -> io::Error {
@@ -137,7 +180,16 @@ fn sequence_length_overflow(line_number: usize) -> io::Error {
     )
 }
 
+#[cfg(test)]
 fn count_sequence_bases<T, I>(iter: I) -> io::Result<u64>
+where
+    T: AsRef<[u8]>,
+    I: IntoIterator<Item = Result<T, io::Error>>,
+{
+    count_sequence_bases_for(iter, SequenceType::Nucleotide)
+}
+
+fn count_sequence_bases_for<T, I>(iter: I, sequence_type: SequenceType) -> io::Result<u64>
 where
     T: AsRef<[u8]>,
     I: IntoIterator<Item = Result<T, io::Error>>,
@@ -146,26 +198,34 @@ where
     for (line_index, line) in iter.into_iter().enumerate() {
         let line_number = line_index + 1;
         let line = line.map_err(|error| with_line_context(line_number, error))?;
-        count_sequence_line(line_number, line.as_ref(), &mut count)?;
+        count_sequence_line(line_number, line.as_ref(), &mut count, sequence_type)?;
     }
     Ok(count)
 }
 
-fn count_sequence_bases_from_file(lines: &LinesInFile) -> io::Result<u64> {
+fn count_sequence_bases_from_file(
+    lines: &LinesInFile,
+    sequence_type: SequenceType,
+) -> io::Result<u64> {
     let mut count = 0u64;
     lines.try_for_each_line(|line_number, line| {
-        count_sequence_line(line_number, line, &mut count)
+        count_sequence_line(line_number, line, &mut count, sequence_type)
     })?;
     Ok(count)
 }
 
-fn count_sequence_line(line_number: usize, line: &[u8], count: &mut u64) -> io::Result<()> {
+fn count_sequence_line(
+    line_number: usize,
+    line: &[u8],
+    count: &mut u64,
+    sequence_type: SequenceType,
+) -> io::Result<()> {
     if line.first() == Some(&b'>') {
         return Ok(());
     }
 
-    let sequence =
-        validated_sequence(line).map_err(|error| with_line_context(line_number, error))?;
+    let sequence = validated_sequence_for(line, sequence_type)
+        .map_err(|error| with_line_context(line_number, error))?;
     if !sequence.is_empty() {
         let length =
             u64::try_from(sequence.len()).map_err(|_| sequence_length_overflow(line_number))?;
@@ -176,13 +236,14 @@ fn count_sequence_line(line_number: usize, line: &[u8], count: &mut u64) -> io::
     Ok(())
 }
 
-fn invalid_nucleic_acid(byte: u8) -> io::Error {
+fn invalid_sequence_symbol(byte: u8, sequence_type: SequenceType) -> io::Error {
+    let message = match sequence_type {
+        SequenceType::Nucleotide => "invalid nucleic acid",
+        SequenceType::Protein => "invalid protein symbol",
+    };
     io::Error::new(
         io::ErrorKind::InvalidData,
-        format!(
-            "invalid nucleic acid: {:?} (0x{byte:02x})",
-            char::from(byte)
-        ),
+        format!("{message}: {:?} (0x{byte:02x})", char::from(byte)),
     )
 }
 
@@ -297,6 +358,7 @@ fn slice(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
             range.start,
             range.end_exclusive,
             args.chars_per_line,
+            args.sequence_type,
             &mut writer,
         )?;
         writer.flush()?;
@@ -311,6 +373,7 @@ fn slice(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
         chars_per_line: args.chars_per_line,
         start: range.start,
         end_exclusive: range.end_exclusive,
+        sequence_type: args.sequence_type,
     };
 
     let file_lines = match args.input {
@@ -372,6 +435,7 @@ struct WriterOptions {
     chars_per_line: usize,
     start: usize,
     end_exclusive: Option<usize>,
+    sequence_type: SequenceType,
 }
 struct Writer<T: std::io::Write> {
     inner: BufWriter<T>,
@@ -424,7 +488,8 @@ impl<T: std::io::Write> Writer<T> {
             return Ok(true);
         }
 
-        let buf = validated_sequence(buf).map_err(|error| with_line_context(line_number, error))?;
+        let buf = validated_sequence_for(buf, self.options.sequence_type)
+            .map_err(|error| with_line_context(line_number, error))?;
         if buf.is_empty() {
             return Ok(true);
         }
@@ -488,8 +553,9 @@ impl<T: std::io::Write> Writer<T> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Args, SequenceRange, Writer, WriterOptions, count_sequence_bases, count_sequence_line,
-        parse_slice_range, strip_line_ending, validated_sequence, write_length,
+        Args, SequenceRange, SequenceType, Writer, WriterOptions, count_sequence_bases,
+        count_sequence_line, parse_slice_range, strip_line_ending, validated_sequence,
+        write_length,
     };
     use clap::Parser;
     use crossbeam::channel::unbounded;
@@ -525,6 +591,7 @@ mod tests {
                 chars_per_line,
                 start: range.start,
                 end_exclusive: range.end_exclusive,
+                sequence_type: SequenceType::Nucleotide,
             },
         ))
     }
@@ -538,6 +605,7 @@ mod tests {
             chars_per_line,
             start: start.unwrap_or(0),
             end_exclusive,
+            sequence_type: SequenceType::Nucleotide,
         }
     }
 
@@ -659,7 +727,7 @@ mod tests {
     fn len_reports_sequence_count_overflow_with_line_context() {
         let mut count = u64::MAX;
 
-        let error = count_sequence_line(8, b"A", &mut count).unwrap_err();
+        let error = count_sequence_line(8, b"A", &mut count, SequenceType::Nucleotide).unwrap_err();
 
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
         assert_eq!(error.to_string(), "line 8: sequence length overflow");

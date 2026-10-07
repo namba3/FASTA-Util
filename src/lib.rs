@@ -1,6 +1,7 @@
 pub mod amino_acid;
 pub mod nucleic_acid;
 
+pub use amino_acid::is_amino_acid;
 pub use nucleic_acid::is_nucleic_acid_lut as is_nucleic_acid;
 
 use std::{
