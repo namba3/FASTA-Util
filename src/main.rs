@@ -491,6 +491,13 @@ fn strip_line_ending(line: &[u8]) -> &[u8] {
     }
 }
 
+fn line_error(line_number: usize, message: &str) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!("line {line_number}: {message}"),
+    )
+}
+
 #[derive(Debug, PartialEq, Eq)]
 #[cfg(test)]
 struct SequenceRange {
@@ -692,10 +699,11 @@ impl<T: std::io::Write> Writer<T> {
 mod tests {
     use super::{
         Args, SequenceRange, SequenceType, Writer, WriterOptions, count_sequence_bases,
-        count_sequence_line, strip_line_ending, validated_sequence, write_length,
+        count_sequence_line, line_error, strip_line_ending, validated_sequence, write_length,
     };
     use clap::Parser;
     use crossbeam::channel::unbounded;
+    use std::io;
 
     fn write_fasta(lines: &[&[u8]], options: WriterOptions) -> Vec<u8> {
         write_fasta_result(lines, options).unwrap()
@@ -1000,6 +1008,14 @@ mod tests {
         assert_eq!(strip_line_ending(b"line\r\n"), b"line");
         assert_eq!(strip_line_ending(b"line"), b"line");
         assert_eq!(strip_line_ending(b"line\r"), b"line\r");
+    }
+
+    #[test]
+    fn line_error_preserves_invalid_data_kind_and_line_context() {
+        let error = line_error(12, "invalid sequence symbol");
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(error.to_string(), "line 12: invalid sequence symbol");
     }
 
     #[test]

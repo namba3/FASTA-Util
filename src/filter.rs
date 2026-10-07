@@ -1,5 +1,6 @@
 use crate::{
     FilterArgs, StatsSequenceType, ensure_distinct_input_output, is_amino_acid, is_nucleic_acid,
+    line_error,
     output::{InputSource, with_output},
     read_lines_from_file,
     selection_bitmap::{SelectionBitmap, write_selected_records},
@@ -186,11 +187,4 @@ fn fraction(count: u64, total: u64) -> f64 {
     } else {
         count as f64 / total as f64
     }
-}
-
-fn line_error(line_number: usize, message: &str) -> io::Error {
-    io::Error::new(
-        io::ErrorKind::InvalidData,
-        format!("line {line_number}: {message}"),
-    )
 }

@@ -1,5 +1,5 @@
 use crate::{
-    GrepArgs, ensure_distinct_input_output,
+    GrepArgs, ensure_distinct_input_output, line_error,
     output::{InputSource, with_output},
     read_lines_from_file,
     selection_bitmap::{SelectionBitmap, write_selected_records},
@@ -78,11 +78,4 @@ fn contains(haystack: &[u8], needle: &[u8], ignore_case: bool) -> bool {
                 }
             })
     })
-}
-
-fn line_error(line_number: usize, message: &str) -> io::Error {
-    io::Error::new(
-        io::ErrorKind::InvalidData,
-        format!("line {line_number}: {message}"),
-    )
 }

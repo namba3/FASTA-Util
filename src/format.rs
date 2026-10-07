@@ -1,6 +1,6 @@
 use crate::{
-    FormatArgs, ensure_distinct_input_output, output::with_output, read_lines_from_file,
-    strip_line_ending,
+    FormatArgs, ensure_distinct_input_output, line_error, output::with_output,
+    read_lines_from_file, strip_line_ending,
 };
 use fasta_util::LinesInFile;
 use std::{
@@ -191,11 +191,4 @@ fn finish_record(
         sequence_line.clear();
     }
     Ok(())
-}
-
-fn line_error(line_number: usize, message: &str) -> io::Error {
-    io::Error::new(
-        io::ErrorKind::InvalidData,
-        format!("line {line_number}: {message}"),
-    )
 }

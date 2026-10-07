@@ -1,5 +1,6 @@
 use crate::{
-    StatsSequenceType, is_amino_acid, is_nucleic_acid, read_lines_from_file, strip_line_ending,
+    StatsSequenceType, is_amino_acid, is_nucleic_acid, line_error, read_lines_from_file,
+    strip_line_ending,
 };
 use fasta_util::LinesInFile;
 use std::{
@@ -218,11 +219,4 @@ fn percentage(count: u64, total: u64) -> f64 {
     } else {
         count as f64 * 100.0 / total as f64
     }
-}
-
-fn line_error(line_number: usize, message: &str) -> io::Error {
-    io::Error::new(
-        io::ErrorKind::InvalidData,
-        format!("line {line_number}: {message}"),
-    )
 }

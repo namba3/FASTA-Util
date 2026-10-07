@@ -1,5 +1,5 @@
 use crate::{
-    LocateArgs, ensure_distinct_input_output, is_nucleic_acid, output::with_output,
+    LocateArgs, ensure_distinct_input_output, is_nucleic_acid, line_error, output::with_output,
     read_lines_from_file, strip_line_ending,
 };
 use fasta_util::LinesInFile;
@@ -280,13 +280,6 @@ fn complement_mask(mask: u8) -> u8 {
         | ((mask & 0b0100) >> 1)
         | ((mask & 0b1000) >> 3)
         | (mask & 0b1_0000)
-}
-
-fn line_error(line_number: usize, message: &str) -> io::Error {
-    io::Error::new(
-        io::ErrorKind::InvalidData,
-        format!("line {line_number}: {message}"),
-    )
 }
 
 #[cfg(test)]

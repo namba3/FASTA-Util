@@ -1,5 +1,5 @@
 use crate::{
-    RevcompArgs, ensure_distinct_input_output, is_nucleic_acid,
+    RevcompArgs, ensure_distinct_input_output, is_nucleic_acid, line_error,
     output::{InputSource, with_output},
     read_lines_from_file, strip_line_ending,
 };
@@ -206,11 +206,4 @@ fn complement(byte: u8, is_rna: bool) -> u8 {
         b's' | b'w' | b'n' => byte,
         _ => unreachable!("sequence symbols were validated before transformation"),
     }
-}
-
-fn line_error(line_number: usize, message: &str) -> io::Error {
-    io::Error::new(
-        io::ErrorKind::InvalidData,
-        format!("line {line_number}: {message}"),
-    )
 }
