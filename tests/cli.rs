@@ -388,6 +388,63 @@ fn stats_reports_aggregate_lengths_n50_and_nucleotide_percentages() {
 }
 
 #[test]
+fn composition_reports_nucleotide_symbol_and_gc_percentages() {
+    let input = TemporaryFile::new(b">a\nAaCcGgTtNnR-\n");
+    let output = run_fasta_util(&["composition", input.path()], b"");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        output.stdout,
+        b"A\t16.67%\nC\t16.67%\nG\t16.67%\nT\t16.67%\nN\t16.67%\nR\t8.33%\n-\t8.33%\nGC\t33.33%\n"
+    );
+}
+
+#[test]
+fn composition_reports_protein_symbols_and_omits_gc() {
+    let input = TemporaryFile::new(b">protein\nACDEX*\n");
+    let output = run_fasta_util(
+        &["composition", input.path(), "--sequence-type", "protein"],
+        b"",
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(stdout.starts_with("A\t16.67%\nC\t16.67%\nD\t16.67%\nE\t16.67%\n"));
+    assert!(stdout.contains("Y\t0.00%\n"));
+    assert!(stdout.contains("X\t16.67%\n"));
+    assert!(stdout.contains("*\t16.67%\n"));
+    assert!(!stdout.lines().any(|line| line.starts_with("GC\t")));
+}
+
+#[test]
+fn composition_reads_rna_from_standard_input_and_rejects_invalid_symbols() {
+    let output = run_fasta_util(&["composition", "-"], b">rna\r\nACGU\r\n");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        output.stdout,
+        b"A\t25.00%\nC\t25.00%\nG\t25.00%\nU\t25.00%\nN\t0.00%\nGC\t50.00%\n"
+    );
+
+    let invalid = run_fasta_util(&["composition"], b">record\nAC?T\n");
+    assert!(!invalid.status.success());
+    assert!(
+        String::from_utf8_lossy(&invalid.stderr).contains("line 2: invalid nucleotide symbol '?'")
+    );
+}
+
+#[test]
 fn stats_reads_fasta_from_standard_input_when_input_is_omitted_or_dash() {
     let contents = b">record\nACGT\n";
     for args in [&["stats"][..], &["stats", "-"][..]] {

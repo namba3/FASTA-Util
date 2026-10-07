@@ -1,3 +1,4 @@
+mod composition;
 mod fasta_index;
 mod filter;
 mod format;
@@ -38,6 +39,8 @@ enum SubCommand {
     Index(IndexArgs),
     #[command(about = "Summarize FASTA sequence statistics")]
     Stats(StatsArgs),
+    #[command(about = "Report FASTA symbol composition")]
+    Composition(CompositionArgs),
     #[command(about = "Get FASTA records, ID regions, or global ranges")]
     Get(GetArgs),
     #[command(about = "Filter FASTA records by sequence properties")]
@@ -84,6 +87,16 @@ struct StatsArgs {
     /// Output format
     #[arg(long, value_enum, default_value_t = StatsFormat::Text)]
     format: StatsFormat,
+
+    /// Sequence alphabet; auto selects protein if a protein-only symbol appears
+    #[arg(long, value_enum, default_value_t = StatsSequenceType::Auto)]
+    sequence_type: StatsSequenceType,
+}
+
+#[derive(Parser)]
+struct CompositionArgs {
+    /// FASTA file to analyze (reads standard input when omitted or set to -)
+    input: Option<PathBuf>,
 
     /// Sequence alphabet; auto selects protein if a protein-only symbol appears
     #[arg(long, value_enum, default_value_t = StatsSequenceType::Auto)]
@@ -307,6 +320,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             args.format,
             args.sequence_type,
         )?,
+        SubCommand::Composition(args) => {
+            composition::run(args.input.as_deref(), args.sequence_type)?
+        }
         SubCommand::Get(args) => get::run(args)?,
         SubCommand::Filter(args) => filter::run(args)?,
         SubCommand::Revcomp(args) => revcomp::run(args)?,

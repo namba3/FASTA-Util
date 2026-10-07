@@ -8,7 +8,7 @@ FASTA ファイルを扱うための CLI ツールです。
 
 FASTAは、塩基配列やアミノ酸配列をテキストで表す形式です。各レコードは`>`で始まるヘッダー行から始まり、その次の行以降に配列を記述します。配列は複数行に折り返して記述できます。
 
-`len`と`get`は、既定で核酸配列を処理します。タンパク質配列を処理する場合は、`--sequence-type protein`を指定してください。`revcomp`と`locate`は核酸配列を処理し、`filter`と`stats`は配列種別を自動判定します。
+`len`と`get`は、既定で核酸配列を処理します。タンパク質配列を処理する場合は、`--sequence-type protein`を指定してください。`revcomp`と`locate`は核酸配列を処理し、`filter`、`stats`、`composition`は配列種別を自動判定します。
 
 ```fasta
 >record-1 optional description
@@ -46,7 +46,7 @@ cargo run --manifest-path=generate_random_data/Cargo.toml -- 10000 --line-width 
 
 ## サブコマンド
 
-配列を入力に取るコマンドは、出力先を指定しなければ結果を標準出力に書きます。`stats`・`filter`・`revcomp`・`format`・`validate`は入力ファイルを省略すると標準入力を読みます。`get`・`grep`・`locate`では入力位置に`-`を指定してください。`len`は既定で標準入力を読み、ファイル入力には`-i`を使います。`index`は`.fai`の保存先を決めるためファイル入力が必要です。
+配列を入力に取るコマンドは、出力先を指定しなければ結果を標準出力に書きます。`stats`・`composition`・`filter`・`revcomp`・`format`・`validate`は入力ファイルを省略すると標準入力を読みます。`get`・`grep`・`locate`では入力位置に`-`を指定してください。`len`は既定で標準入力を読み、ファイル入力には`-i`を使います。`index`は`.fai`の保存先を決めるためファイル入力が必要です。
 
 ```sh
 fasta-util filter --min-len 1000 input.fa |
@@ -78,6 +78,16 @@ FASTA全体のレコード数、合計・最小・最大・平均長、N50、GC�
 ./target/release/fasta-util stats genome.fa --each
 ./target/release/fasta-util stats genome.fa --format json
 ./target/release/fasta-util stats proteins.faa --sequence-type protein --format json
+```
+
+### composition
+
+配列全体に含まれる記号ごとの割合を表示します。核酸配列では`A`・`C`・`G`・`T`（RNAでは`U`）・`N`と、入力に含まれるIUPAC曖昧記号やギャップを表示し、`GC`には`G`と`C`の合計割合を表示します。タンパク質では20種類の標準アミノ酸と、入力に含まれる拡張記号の割合を表示します。割合の分母はギャップや曖昧記号を含む配列記号の総数です。配列種別は`stats`と同様に自動判定し、必要に応じて`--sequence-type nucleotide`または`--sequence-type protein`を指定できます。
+
+```sh
+./target/release/fasta-util composition seq.fa
+./target/release/fasta-util composition proteins.faa --sequence-type protein
+cat seq.fa | ./target/release/fasta-util composition
 ```
 
 ### filter

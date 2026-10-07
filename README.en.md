@@ -8,7 +8,7 @@ A CLI tool for playing with FASTA files
 
 FASTA is a text format for nucleotide or amino acid sequences. Each record starts with a header line beginning with `>`, followed by one or more sequence lines. Sequence data can wrap across multiple lines.
 
-`len` and `get` process nucleotide sequences by default. To process protein sequences, pass `--sequence-type protein`. `revcomp` and `locate` process nucleotide sequences, while `filter` and `stats` detect sequence type automatically.
+`len` and `get` process nucleotide sequences by default. To process protein sequences, pass `--sequence-type protein`. `revcomp` and `locate` process nucleotide sequences, while `filter`, `stats`, and `composition` detect sequence type automatically.
 
 ```fasta
 >record-1 optional description
@@ -46,7 +46,7 @@ cargo run --manifest-path=generate_random_data/Cargo.toml -- 10000 --line-width 
 
 ## Sub Commands
 
-Commands that produce sequence data write to standard output unless an output file is specified. `stats`, `filter`, `revcomp`, `format`, and `validate` read standard input when their input path is omitted. For `get`, `grep`, and `locate`, pass `-` in the input position. `len` reads standard input by default and uses `-i` for file input. `index` requires a file input so it can determine where to write the `.fai` sidecar.
+Commands that produce sequence data write to standard output unless an output file is specified. `stats`, `composition`, `filter`, `revcomp`, `format`, and `validate` read standard input when their input path is omitted. For `get`, `grep`, and `locate`, pass `-` in the input position. `len` reads standard input by default and uses `-i` for file input. `index` requires a file input so it can determine where to write the `.fai` sidecar.
 
 ```sh
 fasta-util filter --min-len 1000 input.fa |
@@ -78,6 +78,16 @@ The default `auto` mode selects protein when it finds a protein symbol that is n
 ./target/release/fasta-util stats genome.fa --each
 ./target/release/fasta-util stats genome.fa --format json
 ./target/release/fasta-util stats proteins.faa --sequence-type protein --format json
+```
+
+### composition
+
+Show the fraction of each symbol across all sequence data. For nucleotides, the output includes `A`, `C`, `G`, `T` (or `U` for RNA), `N`, any IUPAC ambiguity symbols or gaps found in the input, and `GC` for the combined `G` and `C` fraction. For proteins, it reports the 20 standard amino acids and any extended symbols found. The denominator includes every sequence symbol, including gaps and ambiguity symbols. Sequence type is detected automatically as in `stats`; specify `--sequence-type nucleotide` or `--sequence-type protein` when needed.
+
+```sh
+./target/release/fasta-util composition seq.fa
+./target/release/fasta-util composition proteins.faa --sequence-type protein
+cat seq.fa | ./target/release/fasta-util composition
 ```
 
 ### filter
