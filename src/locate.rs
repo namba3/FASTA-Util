@@ -232,6 +232,18 @@ fn window_matches(
     reverse_pattern: &[u8],
     max_mismatch: usize,
 ) -> (bool, bool) {
+    if forward_pattern == reverse_pattern {
+        let mut mismatches = 0;
+        for (sequence_mask, pattern_mask) in window.iter().copied().zip(forward_pattern.iter()) {
+            mismatches += usize::from(sequence_mask & pattern_mask == 0);
+            if mismatches > max_mismatch {
+                return (false, false);
+            }
+        }
+        let matched = mismatches <= max_mismatch;
+        return (matched, matched);
+    }
+
     let mut forward_mismatches = 0;
     let mut reverse_mismatches = 0;
     for ((sequence_mask, forward_mask), reverse_mask) in window
@@ -284,7 +296,8 @@ fn complement_mask(mask: u8) -> u8 {
 
 #[cfg(test)]
 mod tests {
-    use super::{complement_mask, iupac_mask};
+    use super::{complement_mask, iupac_mask, window_matches};
+    use std::collections::VecDeque;
 
     #[test]
     fn maps_standard_iupac_symbols_to_base_sets() {
@@ -309,5 +322,26 @@ mod tests {
             let mask = iupac_mask(*symbol).unwrap();
             assert_eq!(complement_mask(complement_mask(mask)), mask);
         }
+    }
+
+    #[test]
+    fn palindromic_patterns_match_both_strands_with_one_mismatch_count() {
+        let pattern = [0b0001, 0b0010, 0b0010, 0b0001];
+        let exact_window = VecDeque::from(pattern);
+        let one_mismatch_window = VecDeque::from([0b0001, 0b0010, 0b0100, 0b0001]);
+        let two_mismatch_window = VecDeque::from([0b0100, 0b0010, 0b0100, 0b0001]);
+
+        assert_eq!(
+            window_matches(&exact_window, &pattern, &pattern, 0),
+            (true, true)
+        );
+        assert_eq!(
+            window_matches(&one_mismatch_window, &pattern, &pattern, 1),
+            (true, true)
+        );
+        assert_eq!(
+            window_matches(&two_mismatch_window, &pattern, &pattern, 1),
+            (false, false)
+        );
     }
 }
