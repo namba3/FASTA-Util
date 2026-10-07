@@ -1,7 +1,7 @@
 use crate::{
     RevcompArgs, ensure_distinct_input_output, is_nucleic_acid,
     output::{InputSource, with_output},
-    read_lines_from_file,
+    read_lines_from_file, strip_line_ending,
 };
 use fasta_util::LinesInFile;
 use std::{
@@ -205,13 +205,6 @@ fn complement(byte: u8, is_rna: bool) -> u8 {
         b'S' | b'W' | b'N' | b'-' => byte,
         b's' | b'w' | b'n' => byte,
         _ => unreachable!("sequence symbols were validated before transformation"),
-    }
-}
-
-fn strip_line_ending(line: &[u8]) -> &[u8] {
-    match line.strip_suffix(b"\n") {
-        Some(line) => line.strip_suffix(b"\r").unwrap_or(line),
-        None => line,
     }
 }
 

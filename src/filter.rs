@@ -3,6 +3,7 @@ use crate::{
     output::{InputSource, with_output},
     read_lines_from_file,
     selection_bitmap::{SelectionBitmap, write_selected_records},
+    strip_line_ending,
 };
 use fasta_util::LinesInFile;
 use std::{fs::File, io};
@@ -184,13 +185,6 @@ fn fraction(count: u64, total: u64) -> f64 {
         0.0
     } else {
         count as f64 / total as f64
-    }
-}
-
-fn strip_line_ending(line: &[u8]) -> &[u8] {
-    match line.strip_suffix(b"\n") {
-        Some(line) => line.strip_suffix(b"\r").unwrap_or(line),
-        None => line,
     }
 }
 

@@ -995,8 +995,10 @@ mod tests {
 
     #[test]
     fn strip_line_ending_removes_lf_and_crlf_but_preserves_unterminated_cr() {
+        assert_eq!(strip_line_ending(b""), b"");
         assert_eq!(strip_line_ending(b"line\n"), b"line");
         assert_eq!(strip_line_ending(b"line\r\n"), b"line");
+        assert_eq!(strip_line_ending(b"line"), b"line");
         assert_eq!(strip_line_ending(b"line\r"), b"line\r");
     }
 

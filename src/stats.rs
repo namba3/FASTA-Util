@@ -1,6 +1,6 @@
 use crate::{
     LinesInFile, StatsFormat, StatsSequenceType, is_amino_acid, is_nucleic_acid,
-    read_lines_from_file,
+    read_lines_from_file, strip_line_ending,
 };
 use std::{
     fs::File,
@@ -279,13 +279,6 @@ fn stats_error(line_number: usize, message: &str) -> io::Error {
         io::ErrorKind::InvalidData,
         format!("line {line_number}: {message}"),
     )
-}
-
-fn strip_line_ending(line: &[u8]) -> &[u8] {
-    match line.strip_suffix(b"\n") {
-        Some(line) => line.strip_suffix(b"\r").unwrap_or(line),
-        None => line,
-    }
 }
 
 fn sequence_kind(summary: &Summary, sequence_type: StatsSequenceType) -> &'static str {

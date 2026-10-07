@@ -1,4 +1,7 @@
-use crate::{FormatArgs, ensure_distinct_input_output, output::with_output, read_lines_from_file};
+use crate::{
+    FormatArgs, ensure_distinct_input_output, output::with_output, read_lines_from_file,
+    strip_line_ending,
+};
 use fasta_util::LinesInFile;
 use std::{
     fs::File,
@@ -188,13 +191,6 @@ fn finish_record(
         sequence_line.clear();
     }
     Ok(())
-}
-
-fn strip_line_ending(line: &[u8]) -> &[u8] {
-    match line.strip_suffix(b"\n") {
-        Some(line) => line.strip_suffix(b"\r").unwrap_or(line),
-        None => line,
-    }
 }
 
 fn line_error(line_number: usize, message: &str) -> io::Error {

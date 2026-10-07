@@ -3,6 +3,7 @@ use crate::{
     output::{InputSource, with_output},
     read_lines_from_file,
     selection_bitmap::{SelectionBitmap, write_selected_records},
+    strip_line_ending,
 };
 use fasta_util::LinesInFile;
 use std::{fs::File, io};
@@ -77,13 +78,6 @@ fn contains(haystack: &[u8], needle: &[u8], ignore_case: bool) -> bool {
                 }
             })
     })
-}
-
-fn strip_line_ending(line: &[u8]) -> &[u8] {
-    match line.strip_suffix(b"\n") {
-        Some(line) => line.strip_suffix(b"\r").unwrap_or(line),
-        None => line,
-    }
 }
 
 fn line_error(line_number: usize, message: &str) -> io::Error {

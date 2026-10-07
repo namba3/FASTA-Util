@@ -1,7 +1,7 @@
 use crate::{
     GetArgs, SequenceType, fasta_index,
     output::{InputSource, with_output},
-    read_lines_from_file, validated_sequence_for,
+    read_lines_from_file, strip_line_ending, validated_sequence_for,
 };
 use std::{
     collections::HashSet,
@@ -364,13 +364,6 @@ fn write_wrapped<W: Write>(
         }
     }
     Ok(())
-}
-
-fn strip_line_ending(line: &[u8]) -> &[u8] {
-    match line.strip_suffix(b"\n") {
-        Some(line) => line.strip_suffix(b"\r").unwrap_or(line),
-        None => line,
-    }
 }
 
 #[cfg(test)]
