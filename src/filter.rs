@@ -2,13 +2,10 @@ use crate::{
     FilterArgs, StatsSequenceType, ensure_distinct_input_output, is_amino_acid, is_nucleic_acid,
     output::{InputSource, with_output},
     read_lines_from_file,
-    selection_bitmap::SelectionBitmap,
+    selection_bitmap::{SelectionBitmap, write_selected_records},
 };
 use fasta_util::LinesInFile;
-use std::{
-    fs::File,
-    io::{self, Write},
-};
+use std::{fs::File, io};
 
 #[derive(Default)]
 struct Counts {
@@ -188,23 +185,6 @@ fn fraction(count: u64, total: u64) -> f64 {
     } else {
         count as f64 / total as f64
     }
-}
-
-fn write_selected_records(
-    lines: &LinesInFile,
-    selected: &SelectionBitmap,
-    writer: &mut impl Write,
-) -> io::Result<()> {
-    let mut record_index = None;
-    lines.try_for_each_line(|_, raw_line| {
-        if raw_line.first() == Some(&b'>') {
-            record_index = Some(record_index.map_or(0, |index: usize| index + 1));
-        }
-        if record_index.is_some_and(|index| selected.get(index) == Some(true)) {
-            writer.write_all(raw_line)?;
-        }
-        Ok(())
-    })
 }
 
 fn strip_line_ending(line: &[u8]) -> &[u8] {

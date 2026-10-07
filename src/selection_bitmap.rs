@@ -1,3 +1,6 @@
+use fasta_util::LinesInFile;
+use std::io::{self, Write};
+
 /// Compact per-record selection flags used by commands that make two passes
 /// over a FASTA file.
 #[derive(Default)]
@@ -27,6 +30,23 @@ impl SelectionBitmap {
         let bit_index = index % u64::BITS as usize;
         Some(self.words[word_index] & (1_u64 << bit_index) != 0)
     }
+}
+
+pub(crate) fn write_selected_records(
+    lines: &LinesInFile,
+    selected: &SelectionBitmap,
+    writer: &mut impl Write,
+) -> io::Result<()> {
+    let mut record_index = None;
+    lines.try_for_each_line(|_, raw_line| {
+        if raw_line.first() == Some(&b'>') {
+            record_index = Some(record_index.map_or(0, |index: usize| index + 1));
+        }
+        if record_index.is_some_and(|index| selected.get(index) == Some(true)) {
+            writer.write_all(raw_line)?;
+        }
+        Ok(())
+    })
 }
 
 #[cfg(test)]

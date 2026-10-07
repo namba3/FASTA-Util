@@ -684,6 +684,27 @@ fn filter_and_grep_keep_selection_order_across_bitmap_word_boundaries() {
 }
 
 #[test]
+fn filter_and_grep_write_nothing_when_no_records_are_selected() {
+    let input = TemporaryFile::new(b">one\nAC\n>two\nGT\n");
+
+    let filtered = run_fasta_util(&["filter", input.path(), "--min-len", "3"], b"");
+    let grepped = run_fasta_util(&["grep", input.path(), "missing"], b"");
+
+    assert!(
+        filtered.status.success(),
+        "{}",
+        String::from_utf8_lossy(&filtered.stderr)
+    );
+    assert!(
+        grepped.status.success(),
+        "{}",
+        String::from_utf8_lossy(&grepped.stderr)
+    );
+    assert!(filtered.stdout.is_empty());
+    assert!(grepped.stdout.is_empty());
+}
+
+#[test]
 fn filter_rejects_missing_or_contradictory_conditions() {
     let input = TemporaryFile::new(b">record\nACGT\n");
     let no_conditions = run_fasta_util(&["filter", input.path()], b"");

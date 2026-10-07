@@ -2,13 +2,10 @@ use crate::{
     GrepArgs, ensure_distinct_input_output,
     output::{InputSource, with_output},
     read_lines_from_file,
-    selection_bitmap::SelectionBitmap,
+    selection_bitmap::{SelectionBitmap, write_selected_records},
 };
 use fasta_util::LinesInFile;
-use std::{
-    fs::File,
-    io::{self, Write},
-};
+use std::{fs::File, io};
 
 pub(super) fn run(args: GrepArgs) -> Result<(), Box<dyn std::error::Error>> {
     if args.pattern.is_empty() {
@@ -79,23 +76,6 @@ fn contains(haystack: &[u8], needle: &[u8], ignore_case: bool) -> bool {
                     left == right
                 }
             })
-    })
-}
-
-fn write_selected_records(
-    lines: &LinesInFile,
-    selected: &SelectionBitmap,
-    writer: &mut impl Write,
-) -> io::Result<()> {
-    let mut record_index = None;
-    lines.try_for_each_line(|_, raw_line| {
-        if raw_line.first() == Some(&b'>') {
-            record_index = Some(record_index.map_or(0, |index: usize| index + 1));
-        }
-        if record_index.is_some_and(|index| selected.get(index) == Some(true)) {
-            writer.write_all(raw_line)?;
-        }
-        Ok(())
     })
 }
 
