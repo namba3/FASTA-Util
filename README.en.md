@@ -8,7 +8,7 @@ A CLI tool for playing with FASTA files
 
 FASTA is a text format for nucleotide or amino acid sequences. Each record starts with a header line beginning with `>`, followed by one or more sequence lines. Sequence data can wrap across multiple lines.
 
-`len` and `get` process nucleotide sequences by default. To process protein sequences, pass `--sequence-type protein`. Each invocation must process a single sequence type across all records. `stats` supports automatic sequence type detection.
+`len` and `get` process nucleotide sequences by default. To process protein sequences, pass `--sequence-type protein`. `revcomp` transforms nucleotide sequences, while `filter` and `stats` detect sequence type automatically.
 
 ```fasta
 >record-1 optional description
@@ -82,6 +82,16 @@ Select records by sequence length, GC fraction, and `N` fraction. Fractions use 
 ./target/release/fasta-util filter seq.fa --min-gc 0.40 --max-gc 0.60
 ./target/release/fasta-util filter seq.fa --max-n 0.05
 ./target/release/fasta-util filter proteins.fa --min-len 100 --sequence-type protein
+```
+
+### revcomp
+
+Reverse-complement each nucleotide sequence. For DNA, `A` complements to `T`; for RNA, `A` complements to `U`. IUPAC ambiguity symbols and the `-` gap are supported, and letter case is preserved. A record containing both `T` and `U` is rejected. Output wraps at 60 bases by default; set another width with `--chars-per-line`. Use `-o`/`--output` to write to a file.
+
+```sh
+./target/release/fasta-util revcomp seq.fa
+./target/release/fasta-util revcomp seq.fa --chars-per-line 80
+./target/release/fasta-util revcomp seq.fa --output seq.revcomp.fa
 ```
 
 ### get

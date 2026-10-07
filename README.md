@@ -8,7 +8,7 @@ FASTA ファイルを扱うための CLI ツールです。
 
 FASTAは、塩基配列やアミノ酸配列をテキストで表す形式です。各レコードは`>`で始まるヘッダー行から始まり、その次の行以降に配列を記述します。配列は複数行に折り返して記述できます。
 
-`len`と`get`は、既定で核酸配列を処理します。タンパク質配列を処理する場合は、`--sequence-type protein`を指定してください。1回の実行で扱う配列はすべて同じ種類である必要があります。`stats`は配列種別を自動判定します。
+`len`と`get`は、既定で核酸配列を処理します。タンパク質配列を処理する場合は、`--sequence-type protein`を指定してください。`revcomp`は核酸配列を処理し、`filter`と`stats`は配列種別を自動判定します。
 
 ```fasta
 >record-1 optional description
@@ -82,6 +82,16 @@ FASTA全体のレコード数、合計・最小・最大・平均長、N50、GC�
 ./target/release/fasta-util filter seq.fa --min-gc 0.40 --max-gc 0.60
 ./target/release/fasta-util filter seq.fa --max-n 0.05
 ./target/release/fasta-util filter proteins.fa --min-len 100 --sequence-type protein
+```
+
+### revcomp
+
+各レコードの核酸配列を逆相補鎖に変換します。DNAでは`A`を`T`、RNAでは`A`を`U`に対応させます。IUPAC曖昧塩基とギャップ`-`にも対応し、元の大文字・小文字を維持します。同じレコード内に`T`と`U`が混在する配列はエラーになります。出力は既定で60塩基ごとに折り返し、幅は`--chars-per-line`で変更できます。`-o`/`--output`を指定するとファイルに保存します。
+
+```sh
+./target/release/fasta-util revcomp seq.fa
+./target/release/fasta-util revcomp seq.fa --chars-per-line 80
+./target/release/fasta-util revcomp seq.fa --output seq.revcomp.fa
 ```
 
 ### get

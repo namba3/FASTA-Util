@@ -2,6 +2,7 @@ mod fasta_index;
 mod filter;
 mod get;
 mod output;
+mod revcomp;
 mod stats;
 mod validate;
 
@@ -38,6 +39,8 @@ enum SubCommand {
     Get(GetArgs),
     #[command(about = "Filter FASTA records by sequence properties")]
     Filter(FilterArgs),
+    #[command(about = "Reverse-complement nucleotide sequences")]
+    Revcomp(RevcompArgs),
 }
 
 #[derive(Parser)]
@@ -141,6 +144,20 @@ struct FilterArgs {
     output: Option<PathBuf>,
 }
 
+#[derive(Parser)]
+struct RevcompArgs {
+    /// FASTA file containing nucleotide sequences
+    input: PathBuf,
+
+    /// Write output to a file instead of standard output
+    #[arg(short, long)]
+    output: Option<PathBuf>,
+
+    /// Number of sequence characters per output line
+    #[arg(long, default_value_t = 60, value_parser = parse_positive_line_width)]
+    chars_per_line: usize,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
 enum StatsFormat {
     #[default]
@@ -212,6 +229,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         SubCommand::Get(args) => get::run(args)?,
         SubCommand::Filter(args) => filter::run(args)?,
+        SubCommand::Revcomp(args) => revcomp::run(args)?,
     }
 
     Ok(())

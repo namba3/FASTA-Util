@@ -638,6 +638,118 @@ fn filter_validation_failure_preserves_existing_output() {
 }
 
 #[test]
+fn revcomp_preserves_headers_and_transforms_dna_sequences() {
+    let input = TemporaryFile::new(b">seq description\nACGTTGCA\n");
+    let output = run_fasta_util(&["revcomp", input.path()], b"");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b">seq description\nTGCAACGT\n");
+}
+
+#[test]
+fn revcomp_complements_iupac_symbols_and_preserves_case() {
+    let input = TemporaryFile::new(b">upper\nACGTRYKMBVDHSWN-\n>lower\nacgtrykmbvdhswn-\n");
+    let output = run_fasta_util(&["revcomp", input.path(), "--chars-per-line", "8"], b"");
+
+    assert!(output.status.success());
+    assert_eq!(
+        output.stdout,
+        b">upper\n-NWSDHBV\nKMRYACGT\n>lower\n-nwsdhbv\nkmryacgt\n"
+    );
+}
+
+#[test]
+fn revcomp_preserves_rna_alphabet_and_normalizes_line_endings() {
+    let input = TemporaryFile::new(b">rna\r\nAA\r\nCGU\r\n>dna\nAACGT\n");
+    let output = run_fasta_util(&["revcomp", input.path()], b"");
+
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b">rna\nACGUU\n>dna\nACGTT\n");
+}
+
+#[test]
+fn revcomp_handles_sequences_larger_than_its_reverse_read_buffer() {
+    let sequence = (0..65_539)
+        .map(|index| b"ACGTN-"[index % 6])
+        .collect::<Vec<_>>();
+    let mut fasta = b">long\n".to_vec();
+    fasta.extend_from_slice(&sequence);
+    fasta.push(b'\n');
+    let input = TemporaryFile::new(&fasta);
+    let output = run_fasta_util(&["revcomp", input.path()], b"");
+
+    assert!(output.status.success());
+    let mut expected = b">long\n".to_vec();
+    let transformed = sequence
+        .iter()
+        .rev()
+        .map(|byte| match byte {
+            b'A' => b'T',
+            b'C' => b'G',
+            b'G' => b'C',
+            b'T' => b'A',
+            b'N' | b'-' => *byte,
+            _ => unreachable!(),
+        })
+        .collect::<Vec<_>>();
+    for chunk in transformed.chunks(60) {
+        expected.extend_from_slice(chunk);
+        expected.push(b'\n');
+    }
+    assert_eq!(output.stdout, expected);
+}
+
+#[test]
+fn revcomp_rejects_invalid_and_mixed_dna_rna_symbols_without_replacing_output() {
+    for (sequence, message) in [
+        (&b"ACGZ"[..], "invalid nucleotide 'Z'"),
+        (&b"ACTU"[..], "contains both T and U"),
+    ] {
+        let input = TemporaryFile::new(&[b">record\n".as_slice(), sequence, b"\n"].concat());
+        let output_file = TemporaryFile::new(b"previous output");
+        let output = run_fasta_util(
+            &["revcomp", input.path(), "--output", output_file.path()],
+            b"",
+        );
+
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains(message));
+        assert_eq!(output_file.read(), b"previous output");
+    }
+}
+
+#[test]
+fn revcomp_rejects_sequence_before_header_and_empty_header_ids() {
+    for (contents, message) in [
+        (
+            &b"ACGT\n>record\nACGT\n"[..],
+            "sequence data appears before",
+        ),
+        (&b">  \nACGT\n"[..], "record identifier is empty"),
+    ] {
+        let input = TemporaryFile::new(contents);
+        let output = run_fasta_util(&["revcomp", input.path()], b"");
+
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains(message));
+        assert!(output.stdout.is_empty());
+    }
+}
+
+#[test]
+fn revcomp_rejects_zero_output_line_width() {
+    let input = TemporaryFile::new(b">record\nACGT\n");
+    let output = run_fasta_util(&["revcomp", input.path(), "--chars-per-line", "0"], b"");
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("greater than zero"));
+}
+
+#[test]
 fn get_extracts_requested_records_from_a_multi_fasta() {
     let input = TemporaryFile::new(b">chr1 description\nACGT\n>chr2\nTTAA\n>chr3 extra\nGGCC\n");
     let output = run_fasta_util(&["get", input.path(), "chr3", "chr1"], b"");
