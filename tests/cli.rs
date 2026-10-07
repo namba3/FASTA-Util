@@ -1337,6 +1337,20 @@ fn locate_does_not_match_across_record_boundaries() {
 }
 
 #[test]
+fn locate_matches_long_motifs_without_crossing_record_boundaries() {
+    let motif = "A".repeat(65);
+    let short_sequence = "A".repeat(40);
+    let input = TemporaryFile::new(
+        format!(">first\n{short_sequence}\n>second\n{short_sequence}\n>exact\n{motif}\n")
+            .as_bytes(),
+    );
+    let output = run_fasta_util(&["locate", input.path(), &motif], b"");
+
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"exact\t1\t65\t+\n");
+}
+
+#[test]
 fn locate_allows_a_bounded_number_of_mismatches() {
     let input = TemporaryFile::new(b">seq\nAATCAA\n");
     let exact = run_fasta_util(&["locate", input.path(), "AATAAA"], b"");

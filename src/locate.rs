@@ -124,8 +124,8 @@ impl<'a, W: Write> LocateScanner<'a, W> {
         max_mismatch: usize,
         writer: &'a mut W,
     ) -> Self {
-        let bit_parallel = (pattern.len() <= u64::BITS as usize && max_mismatch <= 1)
-            .then(|| BitParallelMatcher::new(pattern, reverse_pattern));
+        let bit_parallel =
+            (max_mismatch <= 1).then(|| BitParallelMatcher::new(pattern, reverse_pattern));
         Self {
             pattern,
             reverse_pattern,
@@ -264,7 +264,12 @@ impl BitParallelMatcher {
     }
 }
 
-struct ShiftAndState {
+enum ShiftAndState {
+    Single(SingleWordShiftAndState),
+    MultiWord(Box<MultiWordShiftAndState>),
+}
+
+struct SingleWordShiftAndState {
     matching_positions: [u64; 17],
     exact_state: u64,
     one_mismatch_state: u64,
@@ -273,6 +278,10 @@ struct ShiftAndState {
 
 impl ShiftAndState {
     fn new(pattern: &[u8]) -> Self {
+        if pattern.len() > u64::BITS as usize {
+            return Self::MultiWord(Box::new(MultiWordShiftAndState::new(pattern)));
+        }
+
         let mut matching_positions = [0u64; 17];
         for (index, pattern_mask) in pattern.iter().copied().enumerate() {
             let position = 1u64 << index;
@@ -282,14 +291,30 @@ impl ShiftAndState {
                 }
             }
         }
-        Self {
+        Self::Single(SingleWordShiftAndState {
             matching_positions,
             exact_state: 0,
             one_mismatch_state: 0,
             final_position: 1u64 << (pattern.len() - 1),
+        })
+    }
+
+    fn reset(&mut self) {
+        match self {
+            Self::Single(state) => state.reset(),
+            Self::MultiWord(state) => state.reset(),
         }
     }
 
+    fn advance(&mut self, sequence_mask: u8, max_mismatch: usize) -> bool {
+        match self {
+            Self::Single(state) => state.advance(sequence_mask, max_mismatch),
+            Self::MultiWord(state) => state.advance(sequence_mask, max_mismatch),
+        }
+    }
+}
+
+impl SingleWordShiftAndState {
     fn reset(&mut self) {
         self.exact_state = 0;
         self.one_mismatch_state = 0;
@@ -307,6 +332,72 @@ impl ShiftAndState {
         self.one_mismatch_state =
             (((previous_one_mismatch << 1) | 1) & matching_positions) | ((previous_exact << 1) | 1);
         self.one_mismatch_state & self.final_position != 0
+    }
+}
+
+struct MultiWordShiftAndState {
+    matching_positions: [Vec<u64>; 17],
+    exact_state: Vec<u64>,
+    one_mismatch_state: Vec<u64>,
+    final_word: usize,
+    final_position: u64,
+}
+
+impl MultiWordShiftAndState {
+    fn new(pattern: &[u8]) -> Self {
+        let word_count = pattern.len().div_ceil(u64::BITS as usize);
+        let mut matching_positions = std::array::from_fn(|_| vec![0u64; word_count]);
+        for (index, pattern_mask) in pattern.iter().copied().enumerate() {
+            let word = index / u64::BITS as usize;
+            let position = 1u64 << (index % u64::BITS as usize);
+            for (sequence_mask, words) in matching_positions.iter_mut().enumerate().skip(1) {
+                if pattern_mask & sequence_mask as u8 != 0 {
+                    words[word] |= position;
+                }
+            }
+        }
+        Self {
+            matching_positions,
+            exact_state: vec![0; word_count],
+            one_mismatch_state: vec![0; word_count],
+            final_word: (pattern.len() - 1) / u64::BITS as usize,
+            final_position: 1u64 << ((pattern.len() - 1) % u64::BITS as usize),
+        }
+    }
+
+    fn reset(&mut self) {
+        self.exact_state.fill(0);
+        self.one_mismatch_state.fill(0);
+    }
+
+    fn advance(&mut self, sequence_mask: u8, max_mismatch: usize) -> bool {
+        let matching_positions = &self.matching_positions[sequence_mask as usize];
+        let mut exact_carry = 1;
+        let mut one_mismatch_carry = 1;
+        for (word, matching_positions) in matching_positions.iter().copied().enumerate() {
+            let previous_exact = self.exact_state[word];
+            let previous_one_mismatch = self.one_mismatch_state[word];
+            let shifted_exact = (previous_exact << 1) | exact_carry;
+            let next_exact = shifted_exact & matching_positions;
+            if max_mismatch == 0 {
+                self.exact_state[word] = next_exact;
+                exact_carry = previous_exact >> (u64::BITS - 1);
+                continue;
+            }
+            let next_one_mismatch = (((previous_one_mismatch << 1) | one_mismatch_carry)
+                & matching_positions)
+                | shifted_exact;
+            exact_carry = previous_exact >> (u64::BITS - 1);
+            one_mismatch_carry = previous_one_mismatch >> (u64::BITS - 1);
+            self.exact_state[word] = next_exact;
+            self.one_mismatch_state[word] = next_one_mismatch;
+        }
+        let state = if max_mismatch == 0 {
+            &self.exact_state
+        } else {
+            &self.one_mismatch_state
+        };
+        state[self.final_word] & self.final_position != 0
     }
 }
 
@@ -443,7 +534,7 @@ mod tests {
 
     #[test]
     fn bit_parallel_matching_agrees_with_window_matching_for_iupac_masks() {
-        let patterns = [
+        let mut patterns = vec![
             vec![0b0001],
             vec![0b0001, 0b1000],
             vec![0b0101, 0b1010],
@@ -451,6 +542,11 @@ mod tests {
             vec![0b0101, 0b1111, 0b1010, 0b1_0000],
             vec![0b0001; 64],
         ];
+        patterns.extend([63, 64, 65, 127, 128, 129].map(|length| {
+            (0..length)
+                .map(|index| [1, 2, 4, 8, 5, 10, 15, 16, 3, 12][index % 10])
+                .collect()
+        }));
         let sequence = (0..257)
             .map(|index| [1, 2, 4, 8, 5, 10, 15, 16, 3, 12][index % 10])
             .collect::<Vec<_>>();
