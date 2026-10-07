@@ -59,6 +59,19 @@ cargo run --manifest-path=generate_random_data/Cargo.toml -- 10000 --line-width 
 10000
 ```
 
+### stats
+
+FASTA全体のレコード数、合計・最小・最大・平均長、N50、GC率、`N`率、配列種別を表示します。`--each`を付けると、レコードごとのID・長さ・GC率・`N`率を表示します。
+
+既定の`auto`では、核酸配列にないタンパク質記号があればタンパク質として判定します。それ以外は`T`と`U`からDNA/RNAを推定し、どちらもない場合は判別不能と表示します。`--sequence-type nucleotide`または`--sequence-type protein`で明示指定できます。タンパク質のGC率と`N`率はテキストでは`n/a`、JSONでは`null`です。
+
+```sh
+./target/release/fasta-util stats genome.fa
+./target/release/fasta-util stats genome.fa --each
+./target/release/fasta-util stats genome.fa --format json
+./target/release/fasta-util stats proteins.faa --sequence-type protein --format json
+```
+
 ### slice
 
 配列の一部を切り出します。
@@ -85,13 +98,22 @@ SUDKUGDWWTSSYBUCKYUDSAADMMRHMT
 
 ### validate
 
-FASTAのレコード構造、配列記号、レコードIDの重複、改行形式、`.fai`で扱える行幅かを確認します。成功時はレコード数と配列種別を表示し、失敗時はファイル名・行・列と該当行を含む診断を表示して、終了コード1を返します。
+FASTAのレコード構造、配列記号、レコードIDの重複、レコード内の改行形式、`.fai`で扱える行幅かを確認します。成功時はレコード数と配列種別を表示し、失敗時はファイル名・行・列と該当行を含む診断を表示して、終了コード1を返します。レコードごとにLFとCRLFが異なるファイルは受け付けます。
 
 既定の核酸モードでは、`T`を含む配列をDNA、`U`を含む配列をRNAと表示します。`T`と`U`の両方がある入力はエラーです。どちらも含まない配列はDNA/RNAを判別できないため、その旨を表示します。タンパク質配列は`--sequence-type protein`で指定します。ギャップ`-`は許可されます。
 
 ```sh
 ./target/release/fasta-util validate seq.fa
 ./target/release/fasta-util validate proteins.faa --sequence-type protein
+```
+
+### index
+
+FASTAを1回ストリーミングして、ランダムアクセス用の`.fai`インデックスを作成します。出力先は入力ファイル名に`.fai`を追加したパスです。入力形式に問題がある場合は作成を中止し、既存のインデックスを保持します。
+
+```sh
+./target/release/fasta-util index genome.fa
+./target/release/fasta-util slice -i genome.fa --fai-index genome.fa.fai --range 100000000..100001000
 ```
 
 ## 簡単なテストとベンチマーク

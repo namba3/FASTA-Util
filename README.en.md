@@ -8,7 +8,7 @@ A CLI tool for playing with FASTA files
 
 FASTA is a text format for nucleotide or amino acid sequences. Each record starts with a header line beginning with `>`, followed by one or more sequence lines. Sequence data can wrap across multiple lines.
 
-`len` and `slice` process nucleotide sequences by default. To process protein sequences, pass `--sequence-type protein`. Each invocation must process a single sequence type across all records; the tool does not infer it from FASTA contents.
+`len` and `slice` process nucleotide sequences by default. To process protein sequences, pass `--sequence-type protein`. Each invocation must process a single sequence type across all records; these commands do not infer it from FASTA contents. `stats` supports automatic sequence type detection.
 
 ```fasta
 >record-1 optional description
@@ -59,6 +59,19 @@ Count the total length of the sequence
 10000
 ```
 
+### stats
+
+Show the record count, total/minimum/maximum/mean length, N50, GC percentage, `N` percentage, and sequence type. Add `--each` to show the ID, length, GC percentage, and `N` percentage for every record.
+
+The default `auto` mode selects protein when it finds a protein symbol that is not valid in nucleotide sequences. Otherwise, it infers DNA or RNA from `T` and `U`; if neither appears, the type is reported as ambiguous. Specify `--sequence-type nucleotide` or `--sequence-type protein` to choose explicitly. GC and `N` percentages are `n/a` in text and `null` in JSON for protein sequences.
+
+```sh
+./target/release/fasta-util stats genome.fa
+./target/release/fasta-util stats genome.fa --each
+./target/release/fasta-util stats genome.fa --format json
+./target/release/fasta-util stats proteins.faa --sequence-type protein --format json
+```
+
 ### slice
 
 Cut out a part of the sequence
@@ -85,13 +98,22 @@ SUDKUGDWWTSSYBUCKYUDSAADMMRHMT
 
 ### validate
 
-Check FASTA record structure, sequence symbols, duplicate record IDs, line endings, and whether sequence line widths can be indexed with `.fai`. On success, the command reports the record count and sequence type. On failure, it prints compiler-style diagnostics with the file, line, column, and source line, then exits with status 1.
+Check FASTA record structure, sequence symbols, duplicate record IDs, line endings within each record, and whether sequence line widths can be indexed with `.fai`. Different records may use different line endings. On success, the command reports the record count and sequence type. On failure, it prints compiler-style diagnostics with the file, line, column, and source line, then exits with status 1.
 
 In the default nucleotide mode, sequences containing `T` are reported as DNA and those containing `U` as RNA. Mixing `T` and `U` is an error. If neither occurs, DNA versus RNA is ambiguous. Select `--sequence-type protein` for protein sequences. The gap symbol `-` is accepted.
 
 ```sh
 ./target/release/fasta-util validate seq.fa
 ./target/release/fasta-util validate proteins.faa --sequence-type protein
+```
+
+### index
+
+Stream through a FASTA file once and create a `.fai` index for random access. The output path is the input filename with `.fai` appended. If the input layout is invalid, index creation stops and any existing index is preserved.
+
+```sh
+./target/release/fasta-util index genome.fa
+./target/release/fasta-util slice -i genome.fa --fai-index genome.fa.fai --range 100000000..100001000
 ```
 
 ## Simple tests and benchmarks

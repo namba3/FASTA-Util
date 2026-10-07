@@ -158,6 +158,14 @@ fn validate_reports_record_count_and_dna_type() {
 }
 
 #[test]
+fn validate_uses_the_first_nonwhitespace_header_identifier() {
+    let output = run_validate(b">  seq description\nACGT\n", &[]);
+
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"OK: 1 records\ntype: DNA\n");
+}
+
+#[test]
 fn validate_reports_rna_and_ambiguous_nucleotide_types() {
     let rna = run_validate(b">rna\nACGU\n", &[]);
     let ambiguous = run_validate(b">ambiguous\nACGN-\n", &[]);
@@ -249,12 +257,20 @@ fn validate_reports_whitespace_inside_sequence_lines() {
 
 #[test]
 fn validate_rejects_mixed_lf_and_crlf_endings() {
-    let output = run_validate(b">seq\nACGT\r\n", &[]);
+    let output = run_validate(b">seq\nACGT\nTGCA\r\n", &[]);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
     assert!(!output.status.success());
     assert!(stderr.contains("mixed LF and CRLF line endings"));
-    assert!(stderr.contains(":2:5\n"));
+    assert!(stderr.contains(":3:5\n"));
+}
+
+#[test]
+fn validate_allows_different_line_endings_between_records() {
+    let output = run_validate(b">first\nACGT\n>second\r\nTGCA\r\n", &[]);
+
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"OK: 2 records\ntype: DNA\n");
 }
 
 #[test]
@@ -273,6 +289,184 @@ fn validate_checks_fai_line_widths_but_allows_a_short_final_line() {
     assert!(!wider.status.success());
     assert!(wider_stderr.contains("sequence line is wider than the first line"));
     assert!(wider_stderr.contains(":3:3\n"));
+}
+
+#[test]
+fn index_writes_standard_fai_rows_for_wrapped_multirecord_input() {
+    let input = TemporaryFile::new(b">chr1 description\nACGT\nTGCA\n>chr2\r\nAACC\r\nGG");
+    let index_path = PathBuf::from(format!("{}.fai", input.path()));
+    let output = run_fasta_util(&["index", input.path()], b"");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Indexed 2 records:"));
+    assert_eq!(
+        fs::read(&index_path).unwrap(),
+        b"chr1\t8\t18\t4\t5\nchr2\t6\t35\t4\t6\n"
+    );
+    let slice = run_fasta_util(
+        &[
+            "slice",
+            "--input",
+            input.path(),
+            "--fai-index",
+            index_path.to_str().unwrap(),
+            "--range",
+            "2..=5",
+        ],
+        b"",
+    );
+    assert!(
+        slice.status.success(),
+        "{}",
+        String::from_utf8_lossy(&slice.stderr)
+    );
+    assert_eq!(slice.stdout, b">chr1 description\nGTTG\n");
+    fs::remove_file(index_path).unwrap();
+}
+
+#[test]
+fn index_failure_preserves_an_existing_index_file() {
+    let input = TemporaryFile::new(b">record\nACGT\nAC\nGG\n");
+    let index_path = PathBuf::from(format!("{}.fai", input.path()));
+    fs::write(&index_path, b"existing index\n").unwrap();
+
+    let output = run_fasta_util(&["index", input.path()], b"");
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("non-final sequence line is shorter"));
+    assert_eq!(fs::read(&index_path).unwrap(), b"existing index\n");
+    fs::remove_file(index_path).unwrap();
+}
+
+#[test]
+fn index_skips_leading_header_whitespace_and_can_slice_the_result() {
+    let input = TemporaryFile::new(b">  seq description\nACGT\n");
+    let index_path = PathBuf::from(format!("{}.fai", input.path()));
+    let index = run_fasta_util(&["index", input.path()], b"");
+
+    assert!(
+        index.status.success(),
+        "{}",
+        String::from_utf8_lossy(&index.stderr)
+    );
+    assert_eq!(fs::read(&index_path).unwrap(), b"seq\t4\t19\t4\t5\n");
+    let slice = run_fasta_util(
+        &[
+            "slice",
+            "--input",
+            input.path(),
+            "--fai-index",
+            index_path.to_str().unwrap(),
+            "--range",
+            "1..=2",
+        ],
+        b"",
+    );
+    assert!(
+        slice.status.success(),
+        "{}",
+        String::from_utf8_lossy(&slice.stderr)
+    );
+    assert_eq!(slice.stdout, b">  seq description\nCG\n");
+    fs::remove_file(index_path).unwrap();
+}
+
+#[test]
+fn stats_reports_aggregate_lengths_n50_and_nucleotide_percentages() {
+    let input = TemporaryFile::new(b">a\nACGTNN\n>b\nGGT\n");
+    let output = run_fasta_util(&["stats", input.path()], b"");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        output.stdout,
+        b"sequences    2\ntotal_len    9\nmin_len      3\nmax_len      6\nmean_len     5\nN50          6\nGC           44.44%\nN            22.22%\ntype         DNA\n"
+    );
+}
+
+#[test]
+fn stats_each_reports_per_record_gc_and_n_percentages() {
+    let input = TemporaryFile::new(b">a\nACGTNN\n>b\nGGT\n");
+    let output = run_fasta_util(&["stats", input.path(), "--each"], b"");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let rows = stdout
+        .lines()
+        .map(|line| line.split_whitespace().collect::<Vec<_>>())
+        .collect::<Vec<_>>();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(rows[0], ["id", "length", "gc", "n"]);
+    assert_eq!(rows[1], ["a", "6", "33.33%", "33.33%"]);
+    assert_eq!(rows[2], ["b", "3", "66.67%", "0.00%"]);
+}
+
+#[test]
+fn stats_json_emits_a_summary_object_and_each_array() {
+    let input = TemporaryFile::new(b">a\nACGTNN\n>b\nGGT\n");
+    let summary = run_fasta_util(&["stats", input.path(), "--format", "json"], b"");
+    let each = run_fasta_util(&["stats", input.path(), "--each", "--format", "json"], b"");
+
+    assert!(summary.status.success());
+    assert_eq!(
+        summary.stdout,
+        b"{\n  \"sequences\": 2,\n  \"total_len\": 9,\n  \"min_len\": 3,\n  \"max_len\": 6,\n  \"mean_len\": 4.5,\n  \"n50\": 6,\n  \"gc_percent\": 44.444444,\n  \"n_percent\": 22.222222,\n  \"type\": \"DNA\"\n}\n"
+    );
+    assert!(each.status.success());
+    assert_eq!(
+        each.stdout,
+        b"[\n  {\"id\": \"a\", \"length\": 6, \"gc_percent\": 33.333333, \"n_percent\": 33.333333},\n  {\"id\": \"b\", \"length\": 3, \"gc_percent\": 66.666667, \"n_percent\": 0.000000}\n]\n"
+    );
+}
+
+#[test]
+fn stats_detects_protein_and_uses_null_gc_fields_in_json() {
+    let input = TemporaryFile::new(b">protein\nACDE\n");
+    let text = run_fasta_util(&["stats", input.path()], b"");
+    let json = run_fasta_util(&["stats", input.path(), "--format", "json"], b"");
+
+    assert!(text.status.success());
+    assert!(
+        String::from_utf8_lossy(&text.stdout)
+            .contains("GC           n/a\nN            n/a\ntype         Protein\n")
+    );
+    assert!(json.status.success());
+    assert!(String::from_utf8_lossy(&json.stdout).contains("\"gc_percent\": null"));
+    assert!(String::from_utf8_lossy(&json.stdout).contains("\"n_percent\": null"));
+}
+
+#[test]
+fn stats_rejects_whitespace_inside_sequence_lines() {
+    let input = TemporaryFile::new(b">a\nAC GT\n");
+    let output = run_fasta_util(&["stats", input.path()], b"");
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("line 2: whitespace in sequence at column 3")
+    );
+}
+
+#[test]
+fn stats_rejects_sequence_data_before_first_record() {
+    let input = TemporaryFile::new(b"ACGT\n>a\nACGT\n");
+    let output = run_fasta_util(&["stats", input.path()], b"");
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("line 1: sequence data appears before the first `>` record")
+    );
 }
 
 #[cfg(unix)]

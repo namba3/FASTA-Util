@@ -26,6 +26,7 @@ struct Record {
     symbol_count: usize,
     first_sequence_line: Option<(usize, usize)>,
     pending_short_line: Option<FaiLine>,
+    line_ending: Option<LineEnding>,
 }
 
 #[derive(Default)]
@@ -73,7 +74,6 @@ pub(super) fn run(path: &Path, sequence_type: SequenceType) -> io::Result<bool> 
     let mut buffer = Vec::new();
     let mut current_record: Option<Record> = None;
     let mut ids = HashMap::<Vec<u8>, (usize, Vec<u8>)>::new();
-    let mut file_line_ending = None;
     let mut first_t: Option<(usize, usize, Vec<u8>)> = None;
     let mut first_u: Option<(usize, usize, Vec<u8>)> = None;
 
@@ -85,21 +85,6 @@ pub(super) fn run(path: &Path, sequence_type: SequenceType) -> io::Result<bool> 
         line_number += 1;
         let (line, line_ending) = strip_line_ending(&buffer);
 
-        if let Some(ending) = line_ending {
-            if file_line_ending.is_some_and(|previous| previous != ending) {
-                reporter.at(
-                    path,
-                    line_number,
-                    line.len().saturating_add(1),
-                    line,
-                    "mixed LF and CRLF line endings",
-                    None,
-                );
-            } else {
-                file_line_ending = Some(ending);
-            }
-        }
-
         if line.first() == Some(&b'>') {
             if let Some(record) = current_record.take() {
                 finish_record(path, record, &mut reporter);
@@ -107,6 +92,7 @@ pub(super) fn run(path: &Path, sequence_type: SequenceType) -> io::Result<bool> 
             records += 1;
             let header = line.to_vec();
             let id = line[1..]
+                .trim_ascii_start()
                 .split(|byte| byte.is_ascii_whitespace())
                 .next()
                 .unwrap_or_default()
@@ -171,6 +157,24 @@ pub(super) fn run(path: &Path, sequence_type: SequenceType) -> io::Result<bool> 
                 None,
             );
             continue;
+        }
+
+        if let Some(ending) = line_ending {
+            if record
+                .line_ending
+                .is_some_and(|previous| previous != ending)
+            {
+                reporter.at(
+                    path,
+                    line_number,
+                    line.len().saturating_add(1),
+                    line,
+                    "mixed LF and CRLF line endings within a record",
+                    None,
+                );
+            } else {
+                record.line_ending = Some(ending);
+            }
         }
 
         record.symbol_count = record.symbol_count.saturating_add(line.len());

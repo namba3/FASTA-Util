@@ -1,0 +1,380 @@
+use crate::{
+    LinesInFile, StatsFormat, StatsSequenceType, is_amino_acid, is_nucleic_acid,
+    read_lines_from_file,
+};
+use std::{fs::File, io, path::Path};
+
+#[derive(Default)]
+struct RecordStats {
+    id: String,
+    length: u64,
+    gc: u64,
+    n: u64,
+}
+
+#[derive(Default)]
+struct Counts {
+    length: u64,
+    gc: u64,
+    n: u64,
+}
+
+#[derive(Default)]
+struct Summary {
+    records: Vec<RecordStats>,
+    total_length: u64,
+    total_gc: u64,
+    total_n: u64,
+    lengths: Vec<u64>,
+    saw_t: bool,
+    saw_u: bool,
+    saw_protein_only: bool,
+}
+
+pub(super) fn run(
+    path: &Path,
+    each: bool,
+    format: StatsFormat,
+    sequence_type: StatsSequenceType,
+) -> io::Result<()> {
+    let file = File::open(path)?;
+    // SAFETY: This command only reads the input; the file must not be modified
+    // while the memory map is alive.
+    let lines = unsafe { read_lines_from_file(file)? };
+    let summary = collect_stats(&lines, sequence_type)?;
+    let kind = sequence_kind(&summary, sequence_type);
+
+    match (format, each) {
+        (StatsFormat::Text, false) => write_summary_text(&summary, kind),
+        (StatsFormat::Text, true) => write_each_text(&summary.records, kind),
+        (StatsFormat::Json, false) => write_summary_json(&summary, kind),
+        (StatsFormat::Json, true) => write_each_json(&summary.records, kind),
+    }
+    Ok(())
+}
+
+fn collect_stats(lines: &LinesInFile, sequence_type: StatsSequenceType) -> io::Result<Summary> {
+    let mut summary = Summary::default();
+    let mut current: Option<(RecordStats, Counts)> = None;
+    let mut saw_record = false;
+
+    lines.try_for_each_line(|line_number, raw_line| {
+        let line = strip_line_ending(raw_line);
+        if line.first() == Some(&b'>') {
+            if let Some((record, counts)) = current.take() {
+                add_record(&mut summary, record, counts)?;
+            }
+            let id = line[1..]
+                .trim_ascii_start()
+                .split(|byte| byte.is_ascii_whitespace())
+                .next()
+                .unwrap_or_default();
+            if id.is_empty() {
+                return Err(stats_error(line_number, "record identifier is empty"));
+            }
+            current = Some((
+                RecordStats {
+                    id: String::from_utf8_lossy(id).into_owned(),
+                    ..RecordStats::default()
+                },
+                Counts::default(),
+            ));
+            saw_record = true;
+            return Ok(());
+        }
+
+        let Some((_, counts)) = current.as_mut() else {
+            if line.is_empty() {
+                return Ok(());
+            }
+            return Err(stats_error(
+                line_number,
+                "sequence data appears before the first `>` record",
+            ));
+        };
+
+        let sequence = line;
+        for (index, byte) in sequence.iter().copied().enumerate() {
+            if byte.is_ascii_whitespace() {
+                return Err(stats_error(
+                    line_number,
+                    &format!("whitespace in sequence at column {}", index + 1),
+                ));
+            }
+
+            let valid = match sequence_type {
+                StatsSequenceType::Nucleotide => is_nucleic_acid(byte),
+                StatsSequenceType::Protein => is_amino_acid(byte),
+                StatsSequenceType::Auto => is_amino_acid(byte),
+            };
+            if !valid {
+                let kind = match sequence_type {
+                    StatsSequenceType::Protein => "protein",
+                    StatsSequenceType::Nucleotide | StatsSequenceType::Auto => "nucleotide",
+                };
+                return Err(stats_error(
+                    line_number,
+                    &format!("invalid {kind} symbol '{}'", char::from(byte)),
+                ));
+            }
+
+            if byte == b'G' || byte == b'g' || byte == b'C' || byte == b'c' {
+                counts.gc = checked_add(counts.gc, 1, line_number, "GC count overflow")?;
+            }
+            if byte == b'N' || byte == b'n' {
+                counts.n = checked_add(counts.n, 1, line_number, "N count overflow")?;
+            }
+            if byte == b'T' || byte == b't' {
+                summary.saw_t = true;
+            } else if byte == b'U' || byte == b'u' {
+                summary.saw_u = true;
+            }
+            if sequence_type == StatsSequenceType::Auto && !is_nucleic_acid(byte) {
+                summary.saw_protein_only = true;
+            }
+            counts.length = checked_add(counts.length, 1, line_number, "sequence length overflow")?;
+        }
+        Ok(())
+    })?;
+
+    if let Some((record, counts)) = current {
+        add_record(&mut summary, record, counts)?;
+    }
+    if !saw_record {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "no FASTA records found",
+        ));
+    }
+    Ok(summary)
+}
+
+fn add_record(summary: &mut Summary, mut record: RecordStats, counts: Counts) -> io::Result<()> {
+    record.length = counts.length;
+    record.gc = counts.gc;
+    record.n = counts.n;
+    summary.total_length = summary
+        .total_length
+        .checked_add(record.length)
+        .ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "total sequence length overflow")
+        })?;
+    summary.total_gc = summary
+        .total_gc
+        .checked_add(record.gc)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "GC count overflow"))?;
+    summary.total_n = summary
+        .total_n
+        .checked_add(record.n)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "N count overflow"))?;
+    summary.lengths.push(record.length);
+    summary.records.push(record);
+    Ok(())
+}
+
+fn checked_add(value: u64, addition: u64, line_number: usize, message: &str) -> io::Result<u64> {
+    value
+        .checked_add(addition)
+        .ok_or_else(|| stats_error(line_number, message))
+}
+
+fn stats_error(line_number: usize, message: &str) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!("line {line_number}: {message}"),
+    )
+}
+
+fn strip_line_ending(line: &[u8]) -> &[u8] {
+    match line.strip_suffix(b"\n") {
+        Some(line) => line.strip_suffix(b"\r").unwrap_or(line),
+        None => line,
+    }
+}
+
+fn sequence_kind(summary: &Summary, sequence_type: StatsSequenceType) -> &'static str {
+    match sequence_type {
+        StatsSequenceType::Protein => "Protein",
+        StatsSequenceType::Nucleotide => nucleotide_kind(summary),
+        StatsSequenceType::Auto if summary.saw_protein_only => "Protein",
+        StatsSequenceType::Auto => nucleotide_kind(summary),
+    }
+}
+
+fn nucleotide_kind(summary: &Summary) -> &'static str {
+    match (summary.saw_t, summary.saw_u) {
+        (true, false) => "DNA",
+        (false, true) => "RNA",
+        (true, true) => "DNA/RNA mixed",
+        (false, false) => "DNA/RNA ambiguous",
+    }
+}
+
+fn n50(summary: &Summary) -> u64 {
+    let mut lengths = summary.lengths.clone();
+    lengths.sort_unstable_by(|left, right| right.cmp(left));
+    let threshold = summary.total_length / 2 + summary.total_length % 2;
+    let mut cumulative = 0u64;
+    for length in lengths {
+        cumulative += length;
+        if cumulative >= threshold {
+            return length;
+        }
+    }
+    0
+}
+
+fn percentage(count: u64, total: u64) -> f64 {
+    if total == 0 {
+        0.0
+    } else {
+        count as f64 * 100.0 / total as f64
+    }
+}
+
+fn rounded_mean(summary: &Summary) -> u64 {
+    let count = summary.records.len() as u64;
+    let quotient = summary.total_length / count;
+    let remainder = summary.total_length % count;
+    if remainder >= count / 2 + count % 2 {
+        quotient + 1
+    } else {
+        quotient
+    }
+}
+
+fn is_protein(kind: &str) -> bool {
+    kind == "Protein"
+}
+
+fn write_summary_text(summary: &Summary, kind: &str) {
+    let gc = if is_protein(kind) {
+        "n/a".to_owned()
+    } else {
+        format!("{:.2}%", percentage(summary.total_gc, summary.total_length))
+    };
+    let n = if is_protein(kind) {
+        "n/a".to_owned()
+    } else {
+        format!("{:.2}%", percentage(summary.total_n, summary.total_length))
+    };
+    println!("sequences    {}", summary.records.len());
+    println!("total_len    {}", with_grouping(summary.total_length));
+    println!(
+        "min_len      {}",
+        with_grouping(*summary.lengths.iter().min().unwrap_or(&0))
+    );
+    println!(
+        "max_len      {}",
+        with_grouping(*summary.lengths.iter().max().unwrap_or(&0))
+    );
+    println!("mean_len     {}", with_grouping(rounded_mean(summary)));
+    println!("N50          {}", with_grouping(n50(summary)));
+    println!("GC           {gc}");
+    println!("N            {n}");
+    println!("type         {kind}");
+}
+
+fn write_each_text(records: &[RecordStats], kind: &str) {
+    let id_width = records
+        .iter()
+        .map(|record| record.id.len())
+        .max()
+        .unwrap_or(2)
+        .max(2);
+    println!(
+        "{:<id_width$}  {:>10}  {:>8}  {:>8}",
+        "id", "length", "gc", "n"
+    );
+    for record in records {
+        let (gc, n) = if is_protein(kind) {
+            ("n/a".to_owned(), "n/a".to_owned())
+        } else {
+            (
+                format!("{:.2}%", percentage(record.gc, record.length)),
+                format!("{:.2}%", percentage(record.n, record.length)),
+            )
+        };
+        println!(
+            "{:<id_width$}  {:>10}  {:>8}  {:>8}",
+            record.id, record.length, gc, n
+        );
+    }
+}
+
+fn write_summary_json(summary: &Summary, kind: &str) {
+    let gc = if is_protein(kind) {
+        "null".to_owned()
+    } else {
+        format!("{:.6}", percentage(summary.total_gc, summary.total_length))
+    };
+    let n = if is_protein(kind) {
+        "null".to_owned()
+    } else {
+        format!("{:.6}", percentage(summary.total_n, summary.total_length))
+    };
+    let mean = summary.total_length as f64 / summary.records.len() as f64;
+    println!(
+        "{{\n  \"sequences\": {},\n  \"total_len\": {},\n  \"min_len\": {},\n  \"max_len\": {},\n  \"mean_len\": {mean},\n  \"n50\": {},\n  \"gc_percent\": {gc},\n  \"n_percent\": {n},\n  \"type\": {}\n}}",
+        summary.records.len(),
+        summary.total_length,
+        summary.lengths.iter().min().unwrap_or(&0),
+        summary.lengths.iter().max().unwrap_or(&0),
+        n50(summary),
+        json_string(kind),
+    );
+}
+
+fn write_each_json(records: &[RecordStats], kind: &str) {
+    println!("[");
+    for (index, record) in records.iter().enumerate() {
+        let (gc, n) = if is_protein(kind) {
+            ("null".to_owned(), "null".to_owned())
+        } else {
+            (
+                format!("{:.6}", percentage(record.gc, record.length)),
+                format!("{:.6}", percentage(record.n, record.length)),
+            )
+        };
+        let comma = if index + 1 == records.len() { "" } else { "," };
+        println!(
+            "  {{\"id\": {}, \"length\": {}, \"gc_percent\": {gc}, \"n_percent\": {n}}}{comma}",
+            json_string(&record.id),
+            record.length,
+        );
+    }
+    println!("]");
+}
+
+fn json_string(value: &str) -> String {
+    let mut output = String::with_capacity(value.len() + 2);
+    output.push('"');
+    for character in value.chars() {
+        match character {
+            '"' => output.push_str("\\\""),
+            '\\' => output.push_str("\\\\"),
+            '\n' => output.push_str("\\n"),
+            '\r' => output.push_str("\\r"),
+            '\t' => output.push_str("\\t"),
+            character if character.is_control() => {
+                use std::fmt::Write as _;
+                let _ = write!(output, "\\u{:04x}", character as u32);
+            }
+            character => output.push(character),
+        }
+    }
+    output.push('"');
+    output
+}
+
+fn with_grouping(value: u64) -> String {
+    let digits = value.to_string();
+    let mut grouped = String::with_capacity(digits.len() + digits.len() / 3);
+    for (index, character) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            grouped.push(',');
+        }
+        grouped.push(character);
+    }
+    grouped
+}

@@ -1,5 +1,6 @@
 mod fasta_index;
 mod output;
+mod stats;
 mod validate;
 
 use clap::{Parser, Subcommand, ValueEnum};
@@ -30,6 +31,10 @@ enum SubCommand {
     Slice(SliceArgs),
     #[command(about = "Validate FASTA structure and sequence symbols")]
     Validate(ValidateArgs),
+    #[command(about = "Create a FASTA .fai index")]
+    Index(IndexArgs),
+    #[command(about = "Summarize FASTA sequence statistics")]
+    Stats(StatsArgs),
 }
 
 #[derive(Parser)]
@@ -44,6 +49,45 @@ struct ValidateArgs {
         help = "Sequence alphabet to validate (nucleotide or protein)"
     )]
     sequence_type: SequenceType,
+}
+
+#[derive(Parser)]
+struct IndexArgs {
+    /// FASTA file to index; writes <input>.fai
+    input: PathBuf,
+}
+
+#[derive(Parser)]
+struct StatsArgs {
+    /// FASTA file to summarize
+    input: PathBuf,
+
+    /// Report statistics for each record instead of the whole file
+    #[arg(long)]
+    each: bool,
+
+    /// Output format
+    #[arg(long, value_enum, default_value_t = StatsFormat::Text)]
+    format: StatsFormat,
+
+    /// Sequence alphabet; auto selects protein if a protein-only symbol appears
+    #[arg(long, value_enum, default_value_t = StatsSequenceType::Auto)]
+    sequence_type: StatsSequenceType,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
+enum StatsFormat {
+    #[default]
+    Text,
+    Json,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
+enum StatsSequenceType {
+    #[default]
+    Auto,
+    Nucleotide,
+    Protein,
 }
 
 #[derive(Parser)]
@@ -127,6 +171,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !validate::run(&args.input, args.sequence_type)? {
                 std::process::exit(1);
             }
+        }
+        SubCommand::Index(args) => {
+            let index_path = fasta_index::index_path(&args.input);
+            ensure_distinct_input_output(&args.input, &index_path)?;
+            let records = fasta_index::create_index(&args.input, &index_path)?;
+            println!("Indexed {records} records: {}", index_path.display());
+        }
+        SubCommand::Stats(args) => {
+            stats::run(&args.input, args.each, args.format, args.sequence_type)?
         }
     }
 
