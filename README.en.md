@@ -83,6 +83,17 @@ GYMDSVCYRAMWNURRVTCYYCYCWWHTRCAUVSBUVHMHNWTGKGHGATWMHYTWNSUB
 SUDKUGDWWTSSYBUCKYUDSAADMMRHMT
 ```
 
+### validate
+
+Check FASTA record structure, sequence symbols, duplicate record IDs, line endings, and whether sequence line widths can be indexed with `.fai`. On success, the command reports the record count and sequence type. On failure, it prints compiler-style diagnostics with the file, line, column, and source line, then exits with status 1.
+
+In the default nucleotide mode, sequences containing `T` are reported as DNA and those containing `U` as RNA. Mixing `T` and `U` is an error. If neither occurs, DNA versus RNA is ambiguous. Select `--sequence-type protein` for protein sequences. The gap symbol `-` is accepted.
+
+```sh
+./target/release/fasta-util validate seq.fa
+./target/release/fasta-util validate proteins.faa --sequence-type protein
+```
+
 ## Simple tests and benchmarks
 
 Run the nucleotide-check benchmark with:

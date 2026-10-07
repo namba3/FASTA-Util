@@ -141,6 +141,140 @@ fn run_fasta_util_with(input: &[u8], configure: impl FnOnce(&mut Command)) -> Ou
     child.wait_with_output().expect("failed to collect output")
 }
 
+fn run_validate(contents: &[u8], options: &[&str]) -> Output {
+    let input = TemporaryFile::new(contents);
+    let mut args = vec!["validate", input.path()];
+    args.extend_from_slice(options);
+    run_fasta_util(&args, b"")
+}
+
+#[test]
+fn validate_reports_record_count_and_dna_type() {
+    let output = run_validate(b">first description\nACGT\n>second\nTTAA\n", &[]);
+
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"OK: 2 records\ntype: DNA\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn validate_reports_rna_and_ambiguous_nucleotide_types() {
+    let rna = run_validate(b">rna\nACGU\n", &[]);
+    let ambiguous = run_validate(b">ambiguous\nACGN-\n", &[]);
+
+    assert!(rna.status.success());
+    assert_eq!(rna.stdout, b"OK: 1 records\ntype: RNA\n");
+    assert!(ambiguous.status.success());
+    assert_eq!(
+        ambiguous.stdout,
+        b"OK: 1 records\ntype: DNA/RNA ambiguous\n"
+    );
+}
+
+#[test]
+fn validate_rejects_mixed_dna_and_rna_symbols() {
+    let output = run_validate(b">dna\nACGT\n>rna\nACGU\n", &[]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!output.status.success());
+    assert!(stderr.contains("DNA and RNA symbols (`T` and `U`) are mixed"));
+    assert!(stderr.contains(":4:4\n"));
+}
+
+#[test]
+fn validate_accepts_protein_alphabet_and_gaps_when_selected() {
+    let output = run_validate(
+        b">protein description\nACDEFGHIKLMNPQRSTVWY\nBJOUXZ*-\n",
+        &["--sequence-type", "protein"],
+    );
+
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"OK: 1 records\ntype: protein\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn validate_rejects_sequence_before_a_header() {
+    let output = run_validate(b"ACGT\n", &[]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!output.status.success());
+    assert!(stderr.contains("sequence data appears before the first `>` record"));
+    assert!(stderr.contains(":1:1\n"));
+    assert!(stderr.contains("error: no FASTA records found"));
+}
+
+#[test]
+fn validate_reports_empty_record_id_and_empty_sequence() {
+    let output = run_validate(b">\n>empty\n>nonempty\nA\n", &[]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!output.status.success());
+    assert!(stderr.contains("record identifier is empty"));
+    assert!(stderr.contains("record has an empty sequence"));
+    assert!(stderr.contains(":1:2\n"));
+}
+
+#[test]
+fn validate_reports_duplicate_record_ids_with_first_occurrence() {
+    let output = run_validate(b">same first\nA\n>same second\nC\n", &[]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!output.status.success());
+    assert!(stderr.contains("duplicate record identifier `same`"));
+    assert!(stderr.contains("identifier `same` first appeared on line 1"));
+    assert!(stderr.contains(":3:2\n"));
+}
+
+#[test]
+fn validate_reports_invalid_symbol_at_its_line_and_column() {
+    let output = run_validate(b">seq\nACGTZACGT\n", &[]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!output.status.success());
+    assert!(stderr.contains("error: invalid nucleotide 'Z'"));
+    assert!(stderr.contains(":2:5\n"));
+    assert!(stderr.contains("2 | ACGTZACGT\n  |     ^"));
+}
+
+#[test]
+fn validate_reports_whitespace_inside_sequence_lines() {
+    let output = run_validate(b">seq\nAC GT\n", &[]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!output.status.success());
+    assert!(stderr.contains("whitespace is not allowed in sequence lines"));
+    assert!(stderr.contains(":2:3\n"));
+}
+
+#[test]
+fn validate_rejects_mixed_lf_and_crlf_endings() {
+    let output = run_validate(b">seq\nACGT\r\n", &[]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!output.status.success());
+    assert!(stderr.contains("mixed LF and CRLF line endings"));
+    assert!(stderr.contains(":2:5\n"));
+}
+
+#[test]
+fn validate_checks_fai_line_widths_but_allows_a_short_final_line() {
+    let valid = run_validate(b">seq\nACGT\nAC\n", &[]);
+    let invalid = run_validate(b">seq\nACGT\nAC\nGT\n", &[]);
+    let wider = run_validate(b">seq\nAC\nGTA\n", &[]);
+    let stderr = String::from_utf8_lossy(&invalid.stderr);
+    let wider_stderr = String::from_utf8_lossy(&wider.stderr);
+
+    assert!(valid.status.success());
+    assert_eq!(valid.stdout, b"OK: 1 records\ntype: DNA\n");
+    assert!(!invalid.status.success());
+    assert!(stderr.contains("non-final sequence line is shorter than the `.fai` line width"));
+    assert!(stderr.contains(":3:3\n"));
+    assert!(!wider.status.success());
+    assert!(wider_stderr.contains("sequence line is wider than the first line"));
+    assert!(wider_stderr.contains(":3:3\n"));
+}
+
 #[cfg(unix)]
 fn temporary_non_utf8_file(contents: &[u8]) -> TemporaryFile {
     use std::os::unix::ffi::OsStringExt;

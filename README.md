@@ -83,6 +83,17 @@ GYMDSVCYRAMWNURRVTCYYCYCWWHTRCAUVSBUVHMHNWTGKGHGATWMHYTWNSUB
 SUDKUGDWWTSSYBUCKYUDSAADMMRHMT
 ```
 
+### validate
+
+FASTAのレコード構造、配列記号、レコードIDの重複、改行形式、`.fai`で扱える行幅かを確認します。成功時はレコード数と配列種別を表示し、失敗時はファイル名・行・列と該当行を含む診断を表示して、終了コード1を返します。
+
+既定の核酸モードでは、`T`を含む配列をDNA、`U`を含む配列をRNAと表示します。`T`と`U`の両方がある入力はエラーです。どちらも含まない配列はDNA/RNAを判別できないため、その旨を表示します。タンパク質配列は`--sequence-type protein`で指定します。ギャップ`-`は許可されます。
+
+```sh
+./target/release/fasta-util validate seq.fa
+./target/release/fasta-util validate proteins.faa --sequence-type protein
+```
+
 ## 簡単なテストとベンチマーク
 
 塩基判定方式のベンチマークを実行するには、次のコマンドを使います。

@@ -1,5 +1,6 @@
 mod fasta_index;
 mod output;
+mod validate;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use crossbeam::channel::{Receiver, bounded};
@@ -27,6 +28,22 @@ enum SubCommand {
     Len(LenArgs),
     #[command(about = "Cut out a part of the sequence")]
     Slice(SliceArgs),
+    #[command(about = "Validate FASTA structure and sequence symbols")]
+    Validate(ValidateArgs),
+}
+
+#[derive(Parser)]
+struct ValidateArgs {
+    /// FASTA file to validate
+    input: PathBuf,
+
+    #[arg(
+        long,
+        value_enum,
+        default_value_t = SequenceType::Nucleotide,
+        help = "Sequence alphabet to validate (nucleotide or protein)"
+    )]
+    sequence_type: SequenceType,
 }
 
 #[derive(Parser)]
@@ -106,6 +123,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     match args.sub {
         SubCommand::Len(args) => len(args)?,
         SubCommand::Slice(args) => slice(args)?,
+        SubCommand::Validate(args) => {
+            if !validate::run(&args.input, args.sequence_type)? {
+                std::process::exit(1);
+            }
+        }
     }
 
     Ok(())
