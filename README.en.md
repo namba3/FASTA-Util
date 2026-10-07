@@ -8,7 +8,7 @@ A CLI tool for playing with FASTA files
 
 FASTA is a text format for nucleotide or amino acid sequences. Each record starts with a header line beginning with `>`, followed by one or more sequence lines. Sequence data can wrap across multiple lines.
 
-`len` and `get` process nucleotide sequences by default. To process protein sequences, pass `--sequence-type protein`. `revcomp` transforms nucleotide sequences, while `filter` and `stats` detect sequence type automatically.
+`len` and `get` process nucleotide sequences by default. To process protein sequences, pass `--sequence-type protein`. `revcomp` and `locate` process nucleotide sequences, while `filter` and `stats` detect sequence type automatically.
 
 ```fasta
 >record-1 optional description
@@ -92,6 +92,25 @@ Reverse-complement each nucleotide sequence. For DNA, `A` complements to `T`; fo
 ./target/release/fasta-util revcomp seq.fa
 ./target/release/fasta-util revcomp seq.fa --chars-per-line 80
 ./target/release/fasta-util revcomp seq.fa --output seq.revcomp.fa
+```
+
+### grep
+
+Search record headers for literal text and print each matching FASTA record in input order. Matching is case-sensitive by default. Use `--ignore-case` for ASCII case-insensitive matching and `--invert-match` to select records without a match.
+
+```sh
+./target/release/fasta-util grep seq.fa BRCA
+./target/release/fasta-util grep seq.fa brca --ignore-case
+```
+
+### locate
+
+Search nucleotide sequences on both strands and print tab-separated `ID`, start, end, and strand columns. Coordinates are 1-based and inclusive. Motifs accept IUPAC nucleotide symbols, and overlapping matches are reported. Set `--max-mismatch` to allow substitutions. Matches in the input orientation use `+`; matches to the reverse complement use `-`. At ambiguous sequence positions, a match is reported when the possible-base sets intersect at every position.
+
+```sh
+./target/release/fasta-util locate genome.fa AATAAA
+./target/release/fasta-util locate seq.fa ATGNNNTAA
+./target/release/fasta-util locate seq.fa AATAAA --max-mismatch 1
 ```
 
 ### get

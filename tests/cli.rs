@@ -750,6 +750,167 @@ fn revcomp_rejects_zero_output_line_width() {
 }
 
 #[test]
+fn grep_selects_complete_records_by_header_text() {
+    let input =
+        TemporaryFile::new(b">BRCA1 description\r\nACGT\r\n>other\r\nBRCA\r\n>BRCA2\r\nTGCA\r\n");
+    let output = run_fasta_util(&["grep", input.path(), "BRCA"], b"");
+
+    assert!(output.status.success());
+    assert_eq!(
+        output.stdout,
+        b">BRCA1 description\r\nACGT\r\n>BRCA2\r\nTGCA\r\n"
+    );
+}
+
+#[test]
+fn grep_supports_case_insensitive_and_inverted_matching() {
+    let input = TemporaryFile::new(b">BRCA1\nACGT\n>other\nTTAA\n>brca2\nTGCA\n");
+    let insensitive = run_fasta_util(&["grep", input.path(), "brca", "--ignore-case"], b"");
+    let inverted = run_fasta_util(
+        &[
+            "grep",
+            input.path(),
+            "BRCA",
+            "--ignore-case",
+            "--invert-match",
+        ],
+        b"",
+    );
+
+    assert!(insensitive.status.success());
+    assert_eq!(insensitive.stdout, b">BRCA1\nACGT\n>brca2\nTGCA\n");
+    assert!(inverted.status.success());
+    assert_eq!(inverted.stdout, b">other\nTTAA\n");
+}
+
+#[test]
+fn grep_writes_matches_to_a_file_and_rejects_same_input_output() {
+    let input = TemporaryFile::new(b">match\nACGT\n>skip\nTTAA\n");
+    let output_file = TemporaryFile::new(b"old output");
+    let output = run_fasta_util(
+        &[
+            "grep",
+            input.path(),
+            "match",
+            "--output",
+            output_file.path(),
+        ],
+        b"",
+    );
+    let same_file = run_fasta_util(
+        &["grep", input.path(), "match", "--output", input.path()],
+        b"",
+    );
+
+    assert!(output.status.success());
+    assert_eq!(output_file.read(), b">match\nACGT\n");
+    assert!(!same_file.status.success());
+    assert_eq!(input.read(), b">match\nACGT\n>skip\nTTAA\n");
+}
+
+#[test]
+fn grep_rejects_empty_pattern_and_data_before_first_record() {
+    let input = TemporaryFile::new(b"ACGT\n>record\nACGT\n");
+    let output = run_fasta_util(&["grep", input.path(), "record"], b"");
+    let empty_pattern_input = TemporaryFile::new(b">record\nACGT\n");
+    let empty_pattern = run_fasta_util(&["grep", empty_pattern_input.path(), ""], b"");
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("sequence data appears before"));
+    assert!(output.stdout.is_empty());
+    assert!(!empty_pattern.status.success());
+    assert!(String::from_utf8_lossy(&empty_pattern.stderr).contains("pattern cannot be empty"));
+}
+
+#[test]
+fn locate_reports_one_based_inclusive_coordinates_on_both_strands() {
+    let input = TemporaryFile::new(b">chr1 description\nAAATA\nAAGG\n>chr3\nCTTTA\nTTG\n");
+    let output = run_fasta_util(&["locate", input.path(), "AATAAA"], b"");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"chr1\t2\t7\t+\nchr3\t2\t7\t-\n");
+}
+
+#[test]
+fn locate_supports_degenerate_iupac_motifs_across_wrapped_lines() {
+    let input = TemporaryFile::new(b">seq description\natg\ngacTAA\n>other\nATGCCCTAA\n");
+    let output = run_fasta_util(&["locate", input.path(), "ATGNNNTAA"], b"");
+
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"seq\t1\t9\t+\nother\t1\t9\t+\n");
+}
+
+#[test]
+fn locate_finds_overlapping_hits_and_reports_palindromic_strands() {
+    let input = TemporaryFile::new(b">repeat\nAAAA\n>palindrome\nAT\n");
+    let overlapping = run_fasta_util(&["locate", input.path(), "AA"], b"");
+    let palindrome = run_fasta_util(&["locate", input.path(), "AT"], b"");
+
+    assert!(overlapping.status.success());
+    assert_eq!(
+        overlapping.stdout,
+        b"repeat\t1\t2\t+\nrepeat\t2\t3\t+\nrepeat\t3\t4\t+\n"
+    );
+    assert!(palindrome.status.success());
+    assert_eq!(
+        palindrome.stdout,
+        b"palindrome\t1\t2\t+\npalindrome\t1\t2\t-\n"
+    );
+}
+
+#[test]
+fn locate_allows_a_bounded_number_of_mismatches() {
+    let input = TemporaryFile::new(b">seq\nAATCAA\n");
+    let exact = run_fasta_util(&["locate", input.path(), "AATAAA"], b"");
+    let one_mismatch = run_fasta_util(
+        &["locate", input.path(), "AATAAA", "--max-mismatch", "1"],
+        b"",
+    );
+
+    assert!(exact.status.success());
+    assert!(exact.stdout.is_empty());
+    assert!(one_mismatch.status.success());
+    assert_eq!(one_mismatch.stdout, b"seq\t1\t6\t+\n");
+
+    let excessive = run_fasta_util(
+        &["locate", input.path(), "AATAAA", "--max-mismatch", "7"],
+        b"",
+    );
+    assert!(!excessive.status.success());
+    assert!(String::from_utf8_lossy(&excessive.stderr).contains("greater than the motif length"));
+}
+
+#[test]
+fn locate_rejects_invalid_motifs_and_sequences_without_replacing_output() {
+    let input = TemporaryFile::new(b">seq\nACGZ\n");
+    let output_file = TemporaryFile::new(b"keep output");
+    let invalid_sequence = run_fasta_util(
+        &[
+            "locate",
+            input.path(),
+            "ACG",
+            "--output",
+            output_file.path(),
+        ],
+        b"",
+    );
+    let invalid_motif = run_fasta_util(&["locate", input.path(), "ACZ"], b"");
+    let empty_motif = run_fasta_util(&["locate", input.path(), ""], b"");
+
+    assert!(!invalid_sequence.status.success());
+    assert!(String::from_utf8_lossy(&invalid_sequence.stderr).contains("invalid nucleotide 'Z'"));
+    assert_eq!(output_file.read(), b"keep output");
+    assert!(!invalid_motif.status.success());
+    assert!(String::from_utf8_lossy(&invalid_motif.stderr).contains("invalid IUPAC"));
+    assert!(!empty_motif.status.success());
+    assert!(String::from_utf8_lossy(&empty_motif.stderr).contains("motif cannot be empty"));
+}
+
+#[test]
 fn get_extracts_requested_records_from_a_multi_fasta() {
     let input = TemporaryFile::new(b">chr1 description\nACGT\n>chr2\nTTAA\n>chr3 extra\nGGCC\n");
     let output = run_fasta_util(&["get", input.path(), "chr3", "chr1"], b"");

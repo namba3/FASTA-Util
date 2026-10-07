@@ -1,6 +1,8 @@
 mod fasta_index;
 mod filter;
 mod get;
+mod grep;
+mod locate;
 mod output;
 mod revcomp;
 mod stats;
@@ -41,6 +43,10 @@ enum SubCommand {
     Filter(FilterArgs),
     #[command(about = "Reverse-complement nucleotide sequences")]
     Revcomp(RevcompArgs),
+    #[command(about = "Search FASTA record headers")]
+    Grep(GrepArgs),
+    #[command(about = "Locate IUPAC nucleotide motifs in FASTA sequences")]
+    Locate(LocateArgs),
 }
 
 #[derive(Parser)]
@@ -158,6 +164,44 @@ struct RevcompArgs {
     chars_per_line: usize,
 }
 
+#[derive(Parser)]
+struct GrepArgs {
+    /// FASTA file to search
+    input: PathBuf,
+
+    /// Literal text to search for in record headers
+    pattern: String,
+
+    /// Match ASCII letters without regard to case
+    #[arg(short, long)]
+    ignore_case: bool,
+
+    /// Keep records whose headers do not match the pattern
+    #[arg(short = 'v', long)]
+    invert_match: bool,
+
+    /// Write matching records to a file instead of standard output
+    #[arg(short, long)]
+    output: Option<PathBuf>,
+}
+
+#[derive(Parser)]
+struct LocateArgs {
+    /// FASTA file to search
+    input: PathBuf,
+
+    /// IUPAC nucleotide motif to locate
+    pattern: String,
+
+    /// Maximum number of mismatching positions (default: 0)
+    #[arg(long, default_value_t = 0)]
+    max_mismatch: usize,
+
+    /// Write tab-separated matches to a file instead of standard output
+    #[arg(short, long)]
+    output: Option<PathBuf>,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
 enum StatsFormat {
     #[default]
@@ -230,6 +274,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         SubCommand::Get(args) => get::run(args)?,
         SubCommand::Filter(args) => filter::run(args)?,
         SubCommand::Revcomp(args) => revcomp::run(args)?,
+        SubCommand::Grep(args) => grep::run(args)?,
+        SubCommand::Locate(args) => locate::run(args)?,
     }
 
     Ok(())

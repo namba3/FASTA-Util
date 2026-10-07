@@ -8,7 +8,7 @@ FASTA ファイルを扱うための CLI ツールです。
 
 FASTAは、塩基配列やアミノ酸配列をテキストで表す形式です。各レコードは`>`で始まるヘッダー行から始まり、その次の行以降に配列を記述します。配列は複数行に折り返して記述できます。
 
-`len`と`get`は、既定で核酸配列を処理します。タンパク質配列を処理する場合は、`--sequence-type protein`を指定してください。`revcomp`は核酸配列を処理し、`filter`と`stats`は配列種別を自動判定します。
+`len`と`get`は、既定で核酸配列を処理します。タンパク質配列を処理する場合は、`--sequence-type protein`を指定してください。`revcomp`と`locate`は核酸配列を処理し、`filter`と`stats`は配列種別を自動判定します。
 
 ```fasta
 >record-1 optional description
@@ -92,6 +92,25 @@ FASTA全体のレコード数、合計・最小・最大・平均長、N50、GC�
 ./target/release/fasta-util revcomp seq.fa
 ./target/release/fasta-util revcomp seq.fa --chars-per-line 80
 ./target/release/fasta-util revcomp seq.fa --output seq.revcomp.fa
+```
+
+### grep
+
+FASTAヘッダーに含まれる文字列でレコードを検索し、一致したレコード全体を入力順に出力します。既定では大文字・小文字を区別します。`--ignore-case`で区別をなくし、`--invert-match`で一致しないレコードを選べます。
+
+```sh
+./target/release/fasta-util grep seq.fa BRCA
+./target/release/fasta-util grep seq.fa brca --ignore-case
+```
+
+### locate
+
+核酸配列内のモチーフを両鎖から検索し、タブ区切りで`ID・開始・終了・strand`を出力します。座標は1始まり・両端包含です。検索語はIUPAC塩基記号に対応し、重複する位置も報告します。`--max-mismatch`で許容する不一致数を指定できます。逆相補配列と一致する位置は`-`、入力配列の向きで一致する位置は`+`です。曖昧塩基を含む配列では、各位置の塩基集合がモチーフの集合と重なる場合に一致とみなします。
+
+```sh
+./target/release/fasta-util locate genome.fa AATAAA
+./target/release/fasta-util locate seq.fa ATGNNNTAA
+./target/release/fasta-util locate seq.fa AATAAA --max-mismatch 1
 ```
 
 ### get
