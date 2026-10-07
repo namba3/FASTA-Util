@@ -2,10 +2,11 @@
 mod support;
 
 use fasta_util::nucleic_acid::NUCLEIC_ACID_SET;
+use std::time::Duration;
+#[cfg(unix)]
 use std::{
     path::Path,
     process::{Command, Output},
-    time::Duration,
 };
 use support::{
     DEFAULT_INPUT_SIZE, DEFAULT_SAMPLE_MS, INVALID_BASES, mixed_sequence, parse_config,
@@ -16,6 +17,8 @@ fn args(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| (*value).to_owned()).collect()
 }
 
+// This benchmark entry point is a Bash script, so its smoke tests run on Unix only.
+#[cfg(unix)]
 fn run_analysis_benchmark(args: &[&str]) -> Output {
     let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/benchmark_analysis.sh");
     Command::new(script)
@@ -25,6 +28,7 @@ fn run_analysis_benchmark(args: &[&str]) -> Output {
 }
 
 #[test]
+#[cfg(unix)]
 fn analysis_benchmark_help_does_not_require_benchmark_dependencies() {
     let output = run_analysis_benchmark(&["--help"]);
 
@@ -35,6 +39,7 @@ fn analysis_benchmark_help_does_not_require_benchmark_dependencies() {
 }
 
 #[test]
+#[cfg(unix)]
 fn analysis_benchmark_rejects_invalid_size_and_run_count() {
     for args in [["63", "1"], ["1000", "0"], ["abc", "1"]] {
         let output = run_analysis_benchmark(&args);
