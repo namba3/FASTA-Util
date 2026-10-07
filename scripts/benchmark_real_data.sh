@@ -7,6 +7,9 @@ binary="$repo_root/target/release/fasta-util"
 rustup_bin="$(command -v rustup || true)"
 seqkit="$(command -v seqkit || true)"
 seqret="$(command -v seqret || true)"
+if [[ -z "$seqret" && -x "$repo_root/dataset/emboss/bin/seqret" ]]; then
+    seqret="$repo_root/dataset/emboss/bin/seqret"
+fi
 hyperfine="$(command -v hyperfine || true)"
 awk_bin="$(command -v awk || true)"
 

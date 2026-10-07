@@ -1,6 +1,6 @@
 # Benchmark results
 
-This report records a benchmark rerun on 2026-10-08. It includes every `fasta-util` subcommand, file and standard-input paths, a multi-command pipeline, the RefSeq GRCh38.p14 dataset, and the Rust microbenchmarks. Use the results as measurements of this environment; they are not performance guarantees.
+This report records benchmark reruns on 2026-10-08. It includes every `fasta-util` subcommand, comparisons with SeqKit and EMBOSS `seqret` where functions overlap, file and standard-input paths, a multi-command pipeline, the RefSeq GRCh38.p14 dataset, and Rust microbenchmarks. Use the results as measurements of this environment; they are not performance guarantees.
 
 Japanese report: [benchmark-results.ja.md](benchmark-results.ja.md).
 
@@ -10,7 +10,7 @@ Japanese report: [benchmark-results.ja.md](benchmark-results.ja.md).
 - AMD Ryzen 9 9900X, 11 cores / 22 logical CPUs reported by WSL2
 - stable Rust 1.99.0, Cargo 1.99.0
 - hyperfine 1.20.0; seqkit 2.10.1
-- EMBOSS `seqret` was unavailable
+- EMBOSS `seqret` 6.6.0.0 from the Ubuntu 26.04 package bundle in `dataset/emboss/`
 
 ## CLI command benchmark
 
@@ -67,21 +67,21 @@ The remeasurement used `dataset/ncbi_dataset/data/GCF_000001405.40/GCF_000001405
 
 | Command | Result | Mean ± σ |
 | --- | ---: | ---: |
-| `seqkit stats` (whole assembly) | 705 records, 3,298,430,636 bases | 1.634 ± 0.056 s |
-| `fasta-util len` (whole assembly) | 3,298,430,636 bases | 1.563 ± 0.045 s |
+| `seqkit stats` (whole assembly) | 705 records, 3,298,430,636 bases | 1.622 ± 0.059 s |
+| `fasta-util len` (whole assembly) | 3,298,430,636 bases | 1.556 ± 0.028 s |
 
 `get` results below are for chromosome 1. The offset is zero-based within the input for describing the selected region; the command uses 1-based inclusive coordinates. Output was wrapped at 60 bases per line.
 
-| Offset | Length | Scan | FAI |
-| ---: | ---: | ---: | ---: |
-| 100,000,000 | 100,000,000 | 48.1 ± 0.7 ms | 48.8 ± 1.6 ms |
-| 100,000,000 | 100,000 | 1.2 ± 0.1 ms | 1.2 ± 0.2 ms |
-| 100,000,000 | 100 | 1.2 ± 0.3 ms | 1.1 ± 0.1 ms |
-| 0 | 100,000,000 | 64.8 ± 4.9 ms | 53.6 ± 2.8 ms |
-| 0 | 100,000 | 1.5 ± 0.4 ms | 1.4 ± 0.1 ms |
-| 0 | 100 | 1.1 ± 0.1 ms | 1.1 ± 0.1 ms |
+| Offset | Length | `seqret` | Scan | FAI |
+| ---: | ---: | ---: | ---: | ---: |
+| 100,000,000 | 100,000,000 | 856.8 ± 67.3 ms | 50.6 ± 1.8 ms | 53.4 ± 2.3 ms |
+| 100,000,000 | 100,000 | 664.3 ± 49.4 ms | 2.4 ± 0.3 ms | 2.5 ± 0.4 ms |
+| 100,000,000 | 100 | 696.2 ± 92.7 ms | 1.5 ± 0.2 ms | 1.5 ± 0.2 ms |
+| 0 | 100,000,000 | 844.0 ± 88.6 ms | 52.3 ± 2.3 ms | 54.0 ± 4.5 ms |
+| 0 | 100,000 | 632.1 ± 31.4 ms | 1.4 ± 0.2 ms | 1.5 ± 0.2 ms |
+| 0 | 100 | 518.5 ± 31.2 ms | 1.1 ± 0.1 ms | 1.1 ± 0.2 ms |
 
-The small-region timings are dominated by process startup and warm file-cache behavior. The larger extraction from the beginning showed a measurable FAI improvement; the middle 100 Mb extraction was effectively the same in this run. `seqret` was unavailable, so this report does not include an external extraction comparison.
+The `seqret` output matched `fasta-util get` byte-for-byte in all six cases. Small-region timings are dominated by process startup and warm file-cache behavior. The large extractions are not directly comparable in bytes read: `fasta-util` seeks into the FASTA, while `seqret` reads the sequence through its sequence I/O path.
 
 Reproduce with the checked-in dataset, or pass another FASTA path as the first argument:
 
@@ -90,7 +90,38 @@ Reproduce with the checked-in dataset, or pass another FASTA path as the first a
 ./scripts/benchmark_real_data.sh path/to/genomic.fna
 ```
 
-The script requires `seqkit`, `hyperfine`, `awk`, and stable Rust. It uses the source dataset and makes temporary benchmark files under the system temporary directory.
+The script requires `seqkit`, `hyperfine`, `awk`, and stable Rust. It uses the source dataset and makes temporary benchmark files under the system temporary directory. It uses `seqret` from `PATH` when available, otherwise it detects the local bundle at `dataset/emboss/bin/seqret`.
+
+The range comparison uses EMBOSS `seqret`'s `-sbegin` and `-send` options, as described in the [official EMBOSS seqret documentation](https://emboss.sourceforge.net/apps/release/6.4/emboss/apps/seqret.html).
+
+## SeqKit comparison
+
+Reproduce the comparable-operation run with:
+
+```sh
+./scripts/benchmark_comparison.sh
+./scripts/benchmark_comparison.sh 50000000 7
+```
+
+This comparison script requires SeqKit, stable Rust, `hyperfine`, and `awk`.
+
+The recorded run used a deterministic 20-million-base FASTA with 533 records of alternating 25 kb and 50 kb lengths. The generated IUPAC ambiguity symbols were mapped to `A`, leaving canonical DNA, so `locate` measured equivalent literal-motif behavior. Before timing, the script compared selected/filter, reverse-complement, header-search, formatting, locate coordinates/strands, and indexed-region outputs. It also checked that `len` and SeqKit's `sum_len` agreed. All timed output was discarded. Each case used one warmup and five runs.
+
+SeqKit's default parallelism is four threads; `fasta-util` processes these inputs in its streaming path. The commands use each tool's normal defaults otherwise. `stats`/`stats --all` calculate overlapping but not identical metric sets, and `len` versus `seqkit stats` compares only the total-length metric. `validate` and `composition` are not included because there is no direct SeqKit command with the same output contract. SeqKit documents the corresponding `stats`, `seq`, `grep`, `locate`, and `faidx` operations in its [usage guide](https://bioinf.shenwei.me/seqkit/usage/).
+
+| Operation | `fasta-util` | SeqKit | Mean ± σ |
+| --- | ---: | ---: | ---: |
+| Total length | `len` | `stats` (`sum_len` only) | 14.7 ± 0.5 ms / 36.2 ± 2.6 ms |
+| Summary statistics | `stats` | `stats --all` | 80.9 ± 1.2 ms / 63.7 ± 2.7 ms |
+| Length filter (min 40 kb) | `filter` | `seq --min-len 40000` | 96.7 ± 4.6 ms / 36.0 ± 2.1 ms |
+| Reverse complement | `revcomp` | `seq --reverse --complement` | 146.6 ± 2.6 ms / 106.0 ± 6.3 ms |
+| Header search | `grep` | `grep --by-name --use-regexp` | 15.0 ± 1.4 ms / 43.4 ± 1.4 ms |
+| Motif location (`ACGA`) | `locate` | `locate` | 127.4 ± 8.6 ms / 133.1 ± 7.3 ms |
+| Rewrap to width 80 | `format` | `seq --line-width 80` | 35.9 ± 1.2 ms / 32.8 ± 1.7 ms |
+| Indexed extraction (10 kb) | `get` | `faidx` | 1.5 ± 0.3 ms / 18.6 ± 1.5 ms |
+| Index creation | `index` | `faidx --update-faidx` | 14.2 ± 0.7 ms / 48.3 ± 3.0 ms |
+
+The indexed extraction result for `fasta-util` is below 5 ms, where hyperfine warns that shell startup calibration limits timing accuracy. Results are environment-sensitive and should not be treated as a universal ranking.
 
 ## Rust microbenchmarks
 
@@ -125,6 +156,7 @@ The focused scripts remain available for investigating specific workloads:
 
 - `./scripts/benchmark_pipeline.sh [BASES] [RUNS]` compares file and stdin modes for `stats`, `filter`, and `revcomp`, plus the complete `filter | revcomp | stats` pipeline.
 - `./scripts/benchmark_analysis.sh [BASES] [RUNS]` varies `stats` record count and `locate` motif length, mismatch allowance, and match frequency.
+- `./scripts/benchmark_comparison.sh [BASES] [RUNS]` checks and times operations shared with SeqKit.
 - `./scripts/benchmark_real_data.sh [FASTA]` compares whole-file `len` with `seqkit stats` and measures `get` with and without `.fai` on chromosome 1. `seqkit` is required; `seqret` is optional.
 
 The script arguments for CLI suites default to 1,000,000 bases and five runs, except `benchmark_commands.sh`, which defaults to 20,000,000 bases. The `cargo bench` programs take their own sampling options; see `-- --help` for the current arguments.

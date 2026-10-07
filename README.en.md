@@ -190,11 +190,12 @@ Stream through a FASTA file once and create a `.fai` index for random access. Th
 
 ## Benchmarks
 
-The procedures and results measured on 2026-10-08 cover every subcommand, standard input and pipelines, a real genome, and internal Rust implementations in [`docs/benchmark-results.md`](docs/benchmark-results.md). CLI benchmarks use `hyperfine`, `awk`, and stable Rust; the default workload is 20 million bases, with one warmup and five measured runs per case.
+The procedures and results cover every subcommand, standard input and pipelines, comparisons with SeqKit and seqret, a real genome, and internal Rust implementations in [`docs/benchmark-results.md`](docs/benchmark-results.md). CLI benchmarks use `hyperfine`, `awk`, and stable Rust; the default workload is 20 million bases, with one warmup and five measured runs per case.
 
 ```sh
 ./scripts/benchmark_commands.sh
 ./scripts/benchmark_commands.sh 50000000 7
+./scripts/benchmark_comparison.sh
 cargo bench --bench nucleic_acid
 cargo bench --bench fasta_io
 ./scripts/benchmark_real_data.sh

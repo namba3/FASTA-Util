@@ -1,6 +1,6 @@
 # ベンチマーク結果
 
-2026-10-08に再測定した結果を記録します。全サブコマンド、標準入力とパイプ、RefSeq GRCh38.p14データセット、Rust内のマイクロベンチマークを含みます。以下の値はこの環境での測定結果で、性能を保証するものではありません。
+2026-10-08に再測定した結果を記録します。全サブコマンド、SeqKit・EMBOSS `seqret`との機能比較、標準入力とパイプ、RefSeq GRCh38.p14データセット、Rust内のマイクロベンチマークを含みます。以下の値はこの環境での測定結果で、性能を保証するものではありません。
 
 English: [benchmark-results.md](benchmark-results.md).
 
@@ -10,7 +10,7 @@ English: [benchmark-results.md](benchmark-results.md).
 - AMD Ryzen 9 9900X（WSL2から11コア・22論理CPUを認識）
 - stable Rust 1.99.0、Cargo 1.99.0
 - hyperfine 1.20.0、seqkit 2.10.1
-- EMBOSS `seqret`は未導入
+- EMBOSS `seqret` 6.6.0.0（Ubuntu 26.04向けの`dataset/emboss/`内ローカルパッケージ）
 
 ## CLIサブコマンド
 
@@ -67,21 +67,21 @@ stable Rust、`hyperfine`、`awk`を用意し、リポジトリルートから�
 
 | コマンド | 結果 | 平均 ± 標準偏差 |
 | --- | ---: | ---: |
-| `seqkit stats`（全ゲノム） | 705レコード、3,298,430,636塩基 | 1.634 ± 0.056 s |
-| `fasta-util len`（全ゲノム） | 3,298,430,636塩基 | 1.563 ± 0.045 s |
+| `seqkit stats`（全ゲノム） | 705レコード、3,298,430,636塩基 | 1.622 ± 0.059 s |
+| `fasta-util len`（全ゲノム） | 3,298,430,636塩基 | 1.556 ± 0.028 s |
 
 以下は第1染色体からの`get`の結果です。オフセットは範囲を説明するための0始まりの値で、コマンドでは1始まり・両端を含む座標を使います。出力は1行60塩基で折り返しています。
 
-| オフセット | 長さ | FAIなし | FAIあり |
-| ---: | ---: | ---: | ---: |
-| 100,000,000 | 100,000,000 | 48.1 ± 0.7 ms | 48.8 ± 1.6 ms |
-| 100,000,000 | 100,000 | 1.2 ± 0.1 ms | 1.2 ± 0.2 ms |
-| 100,000,000 | 100 | 1.2 ± 0.3 ms | 1.1 ± 0.1 ms |
-| 0 | 100,000,000 | 64.8 ± 4.9 ms | 53.6 ± 2.8 ms |
-| 0 | 100,000 | 1.5 ± 0.4 ms | 1.4 ± 0.1 ms |
-| 0 | 100 | 1.1 ± 0.1 ms | 1.1 ± 0.1 ms |
+| オフセット | 長さ | `seqret` | FAIなし | FAIあり |
+| ---: | ---: | ---: | ---: | ---: |
+| 100,000,000 | 100,000,000 | 856.8 ± 67.3 ms | 50.6 ± 1.8 ms | 53.4 ± 2.3 ms |
+| 100,000,000 | 100,000 | 664.3 ± 49.4 ms | 2.4 ± 0.3 ms | 2.5 ± 0.4 ms |
+| 100,000,000 | 100 | 696.2 ± 92.7 ms | 1.5 ± 0.2 ms | 1.5 ± 0.2 ms |
+| 0 | 100,000,000 | 844.0 ± 88.6 ms | 52.3 ± 2.3 ms | 54.0 ± 4.5 ms |
+| 0 | 100,000 | 632.1 ± 31.4 ms | 1.4 ± 0.2 ms | 1.5 ± 0.2 ms |
+| 0 | 100 | 518.5 ± 31.2 ms | 1.1 ± 0.1 ms | 1.1 ± 0.2 ms |
 
-短い範囲の計測はプロセス起動と温まったファイルキャッシュの影響が大きくなります。先頭から100 Mbを切り出すケースではFAIによる改善が確認できましたが、中央からの100 Mb切り出しでは差がほぼありませんでした。`seqret`がなかったため、外部ツールとの比較は含みません。
+6ケースすべてで`seqret`と`fasta-util get`の出力がバイト単位で一致しました。短い範囲の計測はプロセス起動と温まったファイルキャッシュの影響が大きくなります。100 Mb切り出しでは、`fasta-util`がFASTA内をseekする一方、`seqret`は配列I/O経路で読み込むため、読み取るデータ量が異なります。
 
 同梱データセットを使うか、別のFASTAを第1引数に渡して再測定できます。
 
@@ -90,7 +90,38 @@ stable Rust、`hyperfine`、`awk`を用意し、リポジトリルートから�
 ./scripts/benchmark_real_data.sh path/to/genomic.fna
 ```
 
-このスクリプトには`seqkit`、`hyperfine`、`awk`、stable Rustが必要です。元データを読み、作業用ファイルはOSの一時ディレクトリに作ります。
+このスクリプトには`seqkit`、`hyperfine`、`awk`、stable Rustが必要です。元データを読み、作業用ファイルはOSの一時ディレクトリに作ります。`seqret`はPATH上の実行ファイルを使い、見つからない場合は`dataset/emboss/bin/seqret`を探します。
+
+範囲切り出し比較では、[EMBOSS公式seqret説明](https://emboss.sourceforge.net/apps/release/6.4/emboss/apps/seqret.html)にある`-sbegin`・`-send`を使います。
+
+## SeqKitとの比較
+
+機能が重なるコマンドの比較は次のスクリプトで再現できます。
+
+```sh
+./scripts/benchmark_comparison.sh
+./scripts/benchmark_comparison.sh 50000000 7
+```
+
+この比較スクリプトにはSeqKit、stable Rust、`hyperfine`、`awk`が必要です。
+
+測定には、25 kbと50 kbのレコードを交互に含む、2000万塩基・533レコードの決定的なFASTAを使いました。モチーフ検索の条件を揃えるため、生成時にIUPAC曖昧記号を`A`へ変換し、通常のDNA文字だけにしています。計測前に長さフィルター・逆相補・ヘッダー検索・整形・モチーフ位置と鎖向き・FAIを使う領域取得の出力一致を確認し、`len`とSeqKitの`sum_len`も照合しました。各ケースは1回ウォームアップし、5回測定して出力を破棄します。
+
+SeqKitの既定スレッド数は4で、各ツールの既定設定で測定しています。`stats`と`stats --all`の統計項目は一部異なり、`len`と`seqkit stats`は総長だけを比較します。`validate`と`composition`には同じ出力仕様の直接対応コマンドがないため比較していません。SeqKit公式の[使用方法](https://bioinf.shenwei.me/seqkit/usage/)では、対応する`stats`・`seq`・`grep`・`locate`・`faidx`の機能を説明しています。
+
+| 処理 | `fasta-util` | SeqKit | 平均 ± 標準偏差 |
+| --- | ---: | ---: | ---: |
+| 総配列長 | `len` | `stats`（`sum_len`のみ） | 14.7 ± 0.5 ms / 36.2 ± 2.6 ms |
+| 統計 | `stats` | `stats --all` | 80.9 ± 1.2 ms / 63.7 ± 2.7 ms |
+| 長さフィルター（最小40 kb） | `filter` | `seq --min-len 40000` | 96.7 ± 4.6 ms / 36.0 ± 2.1 ms |
+| 逆相補 | `revcomp` | `seq --reverse --complement` | 146.6 ± 2.6 ms / 106.0 ± 6.3 ms |
+| ヘッダー検索 | `grep` | `grep --by-name --use-regexp` | 15.0 ± 1.4 ms / 43.4 ± 1.4 ms |
+| モチーフ位置（`ACGA`） | `locate` | `locate` | 127.4 ± 8.6 ms / 133.1 ± 7.3 ms |
+| 幅80に整形 | `format` | `seq --line-width 80` | 35.9 ± 1.2 ms / 32.8 ± 1.7 ms |
+| FAIを使う領域取得（10 kb） | `get` | `faidx` | 1.5 ± 0.3 ms / 18.6 ± 1.5 ms |
+| インデックス作成 | `index` | `faidx --update-faidx` | 14.2 ± 0.7 ms / 48.3 ± 3.0 ms |
+
+`fasta-util`のFAI取得は5 ms未満で、hyperfineはシェル起動時間の校正精度に警告を出しています。測定値はこの環境における参考値です。
 
 ## Rustマイクロベンチマーク
 
@@ -125,6 +156,7 @@ cargo bench --bench fasta_io
 
 - `./scripts/benchmark_pipeline.sh [BASES] [RUNS]`は`stats`・`filter`・`revcomp`のファイル入力とstdin、および`filter | revcomp | stats`全体を比較します。
 - `./scripts/benchmark_analysis.sh [BASES] [RUNS]`は`stats`のレコード数と`locate`のモチーフ長・不一致許容数・一致頻度を変えて測ります。
+- `./scripts/benchmark_comparison.sh [BASES] [RUNS]`はSeqKitと機能が重なる処理を照合して測定します。
 - `./scripts/benchmark_real_data.sh [FASTA]`は全体の`len`と`seqkit stats`を比較し、第1染色体のFAI有無による`get`を測ります。`seqkit`が必要で、`seqret`は任意です。
 
-CLIスクリプトの既定値は`benchmark_commands.sh`が2000万塩基、その他が100万塩基で、計測回数は5回です。`cargo bench`のサンプル設定はそれぞれの`-- --help`を参照してください。
+CLIスクリプトの既定値は`benchmark_commands.sh`と`benchmark_comparison.sh`が2000万塩基、その他が100万塩基で、計測回数は5回です。`cargo bench`のサンプル設定はそれぞれの`-- --help`を参照してください。

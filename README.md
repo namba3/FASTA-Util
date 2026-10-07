@@ -190,11 +190,12 @@ FASTAを1回ストリーミングして、ランダムアクセス用の`.fai`�
 
 ## ベンチマーク
 
-全サブコマンド、標準入力とパイプ、実ゲノム、Rust内の処理方式を測定する手順と、2026-10-08の再測定結果を[`docs/benchmark-results.ja.md`](docs/benchmark-results.ja.md)にまとめています。CLI測定は`hyperfine`・`awk`・stable Rustを使い、既定で2000万塩基、各ケース1回ウォームアップ・5回計測です。
+全サブコマンド、標準入力とパイプ、SeqKit・seqretとの機能比較、実ゲノム、Rust内の処理方式を測定する手順と結果を[`docs/benchmark-results.ja.md`](docs/benchmark-results.ja.md)にまとめています。CLI測定は`hyperfine`・`awk`・stable Rustを使い、既定で2000万塩基、各ケース1回ウォームアップ・5回計測です。
 
 ```sh
 ./scripts/benchmark_commands.sh
 ./scripts/benchmark_commands.sh 50000000 7
+./scripts/benchmark_comparison.sh
 cargo bench --bench nucleic_acid
 cargo bench --bench fasta_io
 ./scripts/benchmark_real_data.sh
