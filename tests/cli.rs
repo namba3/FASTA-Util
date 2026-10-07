@@ -1193,6 +1193,21 @@ fn locate_reports_one_based_inclusive_coordinates_on_both_strands() {
 }
 
 #[test]
+fn locate_streams_wrapped_stdin_and_reports_sequence_errors() {
+    let output = run_fasta_util(&["locate", "-", "ACG"], b">first description\r\nA\r\nCGT\n");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"first\t1\t3\t+\nfirst\t2\t4\t-\n");
+
+    let invalid = run_fasta_util(&["locate", "-", "ACG"], b">record\nAC?\n");
+    assert!(!invalid.status.success());
+    assert!(String::from_utf8_lossy(&invalid.stderr).contains("line 2: invalid nucleotide '?'"));
+}
+
+#[test]
 fn locate_supports_degenerate_iupac_motifs_across_wrapped_lines() {
     let input = TemporaryFile::new(b">seq description\natg\ngacTAA\n>other\nATGCCCTAA\n");
     let output = run_fasta_util(&["locate", input.path(), "ATGNNNTAA"], b"");

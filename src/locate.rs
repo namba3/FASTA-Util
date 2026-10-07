@@ -1,13 +1,13 @@
 use crate::{
-    LocateArgs, ensure_distinct_input_output, is_nucleic_acid,
-    output::{InputSource, with_output},
+    LocateArgs, ensure_distinct_input_output, is_nucleic_acid, output::with_output,
     read_lines_from_file,
 };
 use fasta_util::LinesInFile;
 use std::{
     collections::VecDeque,
     fs::File,
-    io::{self, Write},
+    io::{self, BufRead, Write},
+    path::Path,
 };
 
 pub(super) fn run(args: LocateArgs) -> Result<(), Box<dyn std::error::Error>> {
@@ -25,19 +25,31 @@ pub(super) fn run(args: LocateArgs) -> Result<(), Box<dyn std::error::Error>> {
         .into());
     }
 
-    let input = InputSource::from_optional_path(Some(&args.input))?;
-    let file = File::open(input.path())?;
-    // SAFETY: The input file must not change while its memory map is alive.
-    let lines = unsafe { read_lines_from_file(file)? };
-    with_output(args.output.as_deref(), |writer| {
-        locate_matches(
-            &lines,
-            &pattern,
-            &reverse_pattern,
-            args.max_mismatch,
-            writer,
-        )
-    })?;
+    if args.input == Path::new("-") {
+        let stdin = io::stdin();
+        with_output(args.output.as_deref(), |writer| {
+            locate_matches_reader(
+                stdin.lock(),
+                &pattern,
+                &reverse_pattern,
+                args.max_mismatch,
+                writer,
+            )
+        })?;
+    } else {
+        let file = File::open(&args.input)?;
+        // SAFETY: The input file must not be modified while the memory map is alive.
+        let lines = unsafe { read_lines_from_file(file)? };
+        with_output(args.output.as_deref(), |writer| {
+            locate_matches(
+                &lines,
+                &pattern,
+                &reverse_pattern,
+                args.max_mismatch,
+                writer,
+            )
+        })?;
+    }
     Ok(())
 }
 
@@ -74,12 +86,65 @@ fn locate_matches(
     max_mismatch: usize,
     writer: &mut impl Write,
 ) -> io::Result<()> {
-    let mut record_id = None::<String>;
-    let mut saw_record = false;
-    let mut position = 0u64;
-    let mut window = VecDeque::with_capacity(pattern.len());
+    let mut scanner = LocateScanner::new(pattern, reverse_pattern, max_mismatch, writer);
+    lines.try_for_each_line(|line_number, raw_line| scanner.process_line(line_number, raw_line))?;
+    scanner.finish()
+}
 
-    lines.try_for_each_line(|line_number, raw_line| {
+fn locate_matches_reader(
+    mut reader: impl BufRead,
+    pattern: &[u8],
+    reverse_pattern: &[u8],
+    max_mismatch: usize,
+    writer: &mut impl Write,
+) -> io::Result<()> {
+    let mut scanner = LocateScanner::new(pattern, reverse_pattern, max_mismatch, writer);
+    let mut line = Vec::new();
+    let mut line_number = 0usize;
+    loop {
+        line.clear();
+        if reader.read_until(b'\n', &mut line)? == 0 {
+            break;
+        }
+        line_number = line_number
+            .checked_add(1)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "line number overflow"))?;
+        scanner.process_line(line_number, &line)?;
+    }
+    scanner.finish()
+}
+
+struct LocateScanner<'a, W: Write> {
+    pattern: &'a [u8],
+    reverse_pattern: &'a [u8],
+    max_mismatch: usize,
+    writer: &'a mut W,
+    record_id: Option<String>,
+    saw_record: bool,
+    position: u64,
+    window: VecDeque<u8>,
+}
+
+impl<'a, W: Write> LocateScanner<'a, W> {
+    fn new(
+        pattern: &'a [u8],
+        reverse_pattern: &'a [u8],
+        max_mismatch: usize,
+        writer: &'a mut W,
+    ) -> Self {
+        Self {
+            pattern,
+            reverse_pattern,
+            max_mismatch,
+            writer,
+            record_id: None,
+            saw_record: false,
+            position: 0,
+            window: VecDeque::with_capacity(pattern.len()),
+        }
+    }
+
+    fn process_line(&mut self, line_number: usize, raw_line: &[u8]) -> io::Result<()> {
         let line = strip_line_ending(raw_line);
         if line.first() == Some(&b'>') {
             let id = line[1..]
@@ -90,13 +155,13 @@ fn locate_matches(
             if id.is_empty() {
                 return Err(line_error(line_number, "record identifier is empty"));
             }
-            record_id = Some(String::from_utf8_lossy(id).into_owned());
-            saw_record = true;
-            position = 0;
-            window.clear();
+            self.record_id = Some(String::from_utf8_lossy(id).into_owned());
+            self.saw_record = true;
+            self.position = 0;
+            self.window.clear();
             return Ok(());
         }
-        if record_id.is_none() {
+        if self.record_id.is_none() {
             if line.is_empty() {
                 return Ok(());
             }
@@ -120,38 +185,45 @@ fn locate_matches(
                 ));
             }
             let mask = iupac_mask(byte).expect("validated nucleotide must have an IUPAC mask");
-            position = position
+            self.position = self
+                .position
                 .checked_add(1)
                 .ok_or_else(|| line_error(line_number, "sequence position overflow"))?;
-            window.push_back(mask);
-            if window.len() > pattern.len() {
-                window.pop_front();
+            self.window.push_back(mask);
+            if self.window.len() > self.pattern.len() {
+                self.window.pop_front();
             }
-            if window.len() != pattern.len() {
+            if self.window.len() != self.pattern.len() {
                 continue;
             }
 
-            let start = position - pattern.len() as u64 + 1;
-            let id = record_id.as_deref().expect("record ID was validated");
-            let (matches_forward, matches_reverse) =
-                window_matches(&window, pattern, reverse_pattern, max_mismatch);
+            let start = self.position - self.pattern.len() as u64 + 1;
+            let id = self.record_id.as_deref().expect("record ID was validated");
+            let (matches_forward, matches_reverse) = window_matches(
+                &self.window,
+                self.pattern,
+                self.reverse_pattern,
+                self.max_mismatch,
+            );
             if matches_forward {
-                writeln!(writer, "{id}\t{start}\t{position}\t+")?;
+                writeln!(self.writer, "{id}\t{start}\t{}\t+", self.position)?;
             }
             if matches_reverse {
-                writeln!(writer, "{id}\t{start}\t{position}\t-")?;
+                writeln!(self.writer, "{id}\t{start}\t{}\t-", self.position)?;
             }
         }
         Ok(())
-    })?;
-
-    if !saw_record {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "no FASTA records found",
-        ));
     }
-    Ok(())
+
+    fn finish(self) -> io::Result<()> {
+        if !self.saw_record {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "no FASTA records found",
+            ));
+        }
+        Ok(())
+    }
 }
 
 fn window_matches(
