@@ -1313,6 +1313,15 @@ fn locate_finds_overlapping_hits_and_reports_palindromic_strands() {
 }
 
 #[test]
+fn locate_does_not_match_across_record_boundaries() {
+    let input = TemporaryFile::new(b">first\nAAAA\n>second\nCCCC\n");
+    let output = run_fasta_util(&["locate", input.path(), "AAAACCCC"], b"");
+
+    assert!(output.status.success());
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
 fn locate_allows_a_bounded_number_of_mismatches() {
     let input = TemporaryFile::new(b">seq\nAATCAA\n");
     let exact = run_fasta_util(&["locate", input.path(), "AATAAA"], b"");

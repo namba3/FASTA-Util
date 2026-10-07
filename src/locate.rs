@@ -114,6 +114,7 @@ struct LocateScanner<'a, W: Write> {
     saw_record: bool,
     position: u64,
     window: VecDeque<u8>,
+    bit_parallel: Option<BitParallelMatcher>,
 }
 
 impl<'a, W: Write> LocateScanner<'a, W> {
@@ -123,6 +124,8 @@ impl<'a, W: Write> LocateScanner<'a, W> {
         max_mismatch: usize,
         writer: &'a mut W,
     ) -> Self {
+        let bit_parallel = (pattern.len() <= u64::BITS as usize && max_mismatch <= 1)
+            .then(|| BitParallelMatcher::new(pattern, reverse_pattern));
         Self {
             pattern,
             reverse_pattern,
@@ -131,7 +134,12 @@ impl<'a, W: Write> LocateScanner<'a, W> {
             record_id: None,
             saw_record: false,
             position: 0,
-            window: VecDeque::with_capacity(pattern.len()),
+            window: VecDeque::with_capacity(if bit_parallel.is_some() {
+                0
+            } else {
+                pattern.len()
+            }),
+            bit_parallel,
         }
     }
 
@@ -150,6 +158,9 @@ impl<'a, W: Write> LocateScanner<'a, W> {
             self.saw_record = true;
             self.position = 0;
             self.window.clear();
+            if let Some(matcher) = &mut self.bit_parallel {
+                matcher.reset();
+            }
             return Ok(());
         }
         if self.record_id.is_none() {
@@ -180,22 +191,29 @@ impl<'a, W: Write> LocateScanner<'a, W> {
                 .position
                 .checked_add(1)
                 .ok_or_else(|| line_error(line_number, "sequence position overflow"))?;
-            self.window.push_back(mask);
-            if self.window.len() > self.pattern.len() {
-                self.window.pop_front();
-            }
-            if self.window.len() != self.pattern.len() {
-                continue;
-            }
-
+            let (matches_forward, matches_reverse) = if let Some(matcher) = &mut self.bit_parallel {
+                let matches = matcher.advance(mask, self.max_mismatch);
+                if self.position < self.pattern.len() as u64 {
+                    continue;
+                }
+                matches
+            } else {
+                self.window.push_back(mask);
+                if self.window.len() > self.pattern.len() {
+                    self.window.pop_front();
+                }
+                if self.window.len() != self.pattern.len() {
+                    continue;
+                }
+                window_matches(
+                    &self.window,
+                    self.pattern,
+                    self.reverse_pattern,
+                    self.max_mismatch,
+                )
+            };
             let start = self.position - self.pattern.len() as u64 + 1;
             let id = self.record_id.as_deref().expect("record ID was validated");
-            let (matches_forward, matches_reverse) = window_matches(
-                &self.window,
-                self.pattern,
-                self.reverse_pattern,
-                self.max_mismatch,
-            );
             if matches_forward {
                 writeln!(self.writer, "{id}\t{start}\t{}\t+", self.position)?;
             }
@@ -214,6 +232,78 @@ impl<'a, W: Write> LocateScanner<'a, W> {
             ));
         }
         Ok(())
+    }
+}
+
+struct BitParallelMatcher {
+    forward: ShiftAndState,
+    reverse: ShiftAndState,
+}
+
+impl BitParallelMatcher {
+    fn new(forward_pattern: &[u8], reverse_pattern: &[u8]) -> Self {
+        Self {
+            forward: ShiftAndState::new(forward_pattern),
+            reverse: ShiftAndState::new(reverse_pattern),
+        }
+    }
+
+    fn reset(&mut self) {
+        self.forward.reset();
+        self.reverse.reset();
+    }
+
+    fn advance(&mut self, sequence_mask: u8, max_mismatch: usize) -> (bool, bool) {
+        (
+            self.forward.advance(sequence_mask, max_mismatch),
+            self.reverse.advance(sequence_mask, max_mismatch),
+        )
+    }
+}
+
+struct ShiftAndState {
+    matching_positions: [u64; 17],
+    exact_state: u64,
+    one_mismatch_state: u64,
+    final_position: u64,
+}
+
+impl ShiftAndState {
+    fn new(pattern: &[u8]) -> Self {
+        let mut matching_positions = [0u64; 17];
+        for (index, pattern_mask) in pattern.iter().copied().enumerate() {
+            let position = 1u64 << index;
+            for (sequence_mask, matches) in matching_positions.iter_mut().enumerate().skip(1) {
+                if pattern_mask & sequence_mask as u8 != 0 {
+                    *matches |= position;
+                }
+            }
+        }
+        Self {
+            matching_positions,
+            exact_state: 0,
+            one_mismatch_state: 0,
+            final_position: 1u64 << (pattern.len() - 1),
+        }
+    }
+
+    fn reset(&mut self) {
+        self.exact_state = 0;
+        self.one_mismatch_state = 0;
+    }
+
+    fn advance(&mut self, sequence_mask: u8, max_mismatch: usize) -> bool {
+        let matching_positions = self.matching_positions[sequence_mask as usize];
+        let previous_exact = self.exact_state;
+        self.exact_state = ((previous_exact << 1) | 1) & matching_positions;
+        if max_mismatch == 0 {
+            return self.exact_state & self.final_position != 0;
+        }
+
+        let previous_one_mismatch = self.one_mismatch_state;
+        self.one_mismatch_state =
+            (((previous_one_mismatch << 1) | 1) & matching_positions) | ((previous_exact << 1) | 1);
+        self.one_mismatch_state & self.final_position != 0
     }
 }
 
@@ -287,7 +377,7 @@ fn complement_mask(mask: u8) -> u8 {
 
 #[cfg(test)]
 mod tests {
-    use super::{complement_mask, iupac_mask, window_matches};
+    use super::{BitParallelMatcher, complement_mask, iupac_mask, window_matches};
     use std::collections::VecDeque;
 
     #[test]
@@ -334,5 +424,50 @@ mod tests {
             window_matches(&two_mismatch_window, &pattern, &pattern, 1),
             (false, false)
         );
+    }
+
+    #[test]
+    fn bit_parallel_matching_agrees_with_window_matching_for_iupac_masks() {
+        let patterns = [
+            vec![0b0001],
+            vec![0b0001, 0b0010, 0b0100],
+            vec![0b0101, 0b1111, 0b1010, 0b1_0000],
+            vec![0b0001; 64],
+        ];
+        let sequence = (0..257)
+            .map(|index| [1, 2, 4, 8, 5, 10, 15, 16, 3, 12][index % 10])
+            .collect::<Vec<_>>();
+
+        for pattern in patterns {
+            let reverse_pattern = pattern
+                .iter()
+                .rev()
+                .copied()
+                .map(complement_mask)
+                .collect::<Vec<_>>();
+            for max_mismatch in 0..=1 {
+                let mut matcher = BitParallelMatcher::new(&pattern, &reverse_pattern);
+                let mut window = VecDeque::with_capacity(pattern.len());
+
+                for (position, mask) in sequence.iter().copied().enumerate() {
+                    let actual = matcher.advance(mask, max_mismatch);
+                    window.push_back(mask);
+                    if window.len() > pattern.len() {
+                        window.pop_front();
+                    }
+                    let expected = if window.len() == pattern.len() {
+                        window_matches(&window, &pattern, &reverse_pattern, max_mismatch)
+                    } else {
+                        (false, false)
+                    };
+                    assert_eq!(
+                        actual,
+                        expected,
+                        "pattern length {}, position {position}, mismatch {max_mismatch}",
+                        pattern.len()
+                    );
+                }
+            }
+        }
     }
 }
