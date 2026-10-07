@@ -133,10 +133,12 @@ fn locate_matches(
 
             let start = position - pattern.len() as u64 + 1;
             let id = record_id.as_deref().expect("record ID was validated");
-            if window_mismatches(&window, pattern) <= max_mismatch {
+            let (matches_forward, matches_reverse) =
+                window_matches(&window, pattern, reverse_pattern, max_mismatch);
+            if matches_forward {
                 writeln!(writer, "{id}\t{start}\t{position}\t+")?;
             }
-            if window_mismatches(&window, reverse_pattern) <= max_mismatch {
+            if matches_reverse {
                 writeln!(writer, "{id}\t{start}\t{position}\t-")?;
             }
         }
@@ -152,13 +154,30 @@ fn locate_matches(
     Ok(())
 }
 
-fn window_mismatches(window: &VecDeque<u8>, pattern: &[u8]) -> usize {
-    window
+fn window_matches(
+    window: &VecDeque<u8>,
+    forward_pattern: &[u8],
+    reverse_pattern: &[u8],
+    max_mismatch: usize,
+) -> (bool, bool) {
+    let mut forward_mismatches = 0;
+    let mut reverse_mismatches = 0;
+    for ((sequence_mask, forward_mask), reverse_mask) in window
         .iter()
         .copied()
-        .zip(pattern.iter().copied())
-        .filter(|(sequence_mask, motif_mask)| sequence_mask & motif_mask == 0)
-        .count()
+        .zip(forward_pattern.iter().copied())
+        .zip(reverse_pattern.iter().copied())
+    {
+        forward_mismatches += usize::from(sequence_mask & forward_mask == 0);
+        reverse_mismatches += usize::from(sequence_mask & reverse_mask == 0);
+        if forward_mismatches > max_mismatch && reverse_mismatches > max_mismatch {
+            break;
+        }
+    }
+    (
+        forward_mismatches <= max_mismatch,
+        reverse_mismatches <= max_mismatch,
+    )
 }
 
 fn iupac_mask(byte: u8) -> Option<u8> {
