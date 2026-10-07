@@ -223,6 +223,83 @@ struct SequenceOutputOptions {
     sequence_type: SequenceType,
 }
 
+pub(super) struct NamedRange<'a> {
+    pub(super) name: &'a [u8],
+    pub(super) start: usize,
+    pub(super) end_exclusive: Option<usize>,
+    pub(super) region_header: Option<&'a [u8]>,
+}
+
+pub(super) fn write_named_ranges<W: Write>(
+    input_path: &Path,
+    index_path: &Path,
+    queries: &[NamedRange<'_>],
+    chars_per_line: usize,
+    sequence_type: SequenceType,
+    writer: &mut W,
+) -> io::Result<Vec<bool>> {
+    let records = read_index(index_path)?;
+    let mut input = File::open(input_path)?;
+    let file_length = input.metadata()?.len();
+    validate_index_bounds(&records, file_length)?;
+    let options = SequenceOutputOptions {
+        chars_per_line,
+        sequence_type,
+    };
+    let mut matched = vec![false; queries.len()];
+
+    for record in &records {
+        let matching_queries = queries
+            .iter()
+            .enumerate()
+            .filter(|(_, query)| query.name == record.name);
+        for (query_index, query) in matching_queries {
+            matched[query_index] = true;
+            let source_header = read_header(&mut input, record.sequence_offset, &record.name)?;
+            let header = match query.region_header {
+                Some(region_header) => {
+                    let mut output_header = Vec::with_capacity(region_header.len() + 2);
+                    output_header.push(b'>');
+                    output_header.extend_from_slice(region_header);
+                    output_header.push(b'\n');
+                    output_header
+                }
+                None => source_header,
+            };
+            if header.first() != Some(&b'>') {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "FAI record header is malformed",
+                ));
+            }
+            writer.write_all(strip_line_ending(&header))?;
+            writer.write_all(b"\n")?;
+
+            let start = query.start.min(record.length);
+            let end = query
+                .end_exclusive
+                .unwrap_or(record.length)
+                .min(record.length);
+            let mut written = 0usize;
+            if start < end {
+                write_sequence_range(
+                    &mut input,
+                    record,
+                    start,
+                    end,
+                    options,
+                    &mut written,
+                    writer,
+                )?;
+            }
+            if written > 0 && !written.is_multiple_of(chars_per_line) {
+                writer.write_all(b"\n")?;
+            }
+        }
+    }
+    Ok(matched)
+}
+
 pub(super) fn write_slice<W: Write>(
     input_path: &Path,
     index_path: &Path,

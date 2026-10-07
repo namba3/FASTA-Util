@@ -1,10 +1,12 @@
 mod fasta_index;
+mod get;
 mod output;
 mod stats;
 mod validate;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use crossbeam::channel::{Receiver, bounded};
+#[cfg(test)]
+use crossbeam::channel::Receiver;
 use fasta_util::{
     LinesInFile, is_amino_acid, is_nucleic_acid, read_lines_from_file, read_lines_from_stdin,
 };
@@ -13,8 +15,6 @@ use std::{
     io::{self, BufWriter, Write},
     path::{Path, PathBuf},
 };
-
-const LINE_CHANNEL_CAPACITY: usize = 32;
 
 #[derive(Parser)]
 #[command(author, version, about)]
@@ -27,14 +27,14 @@ struct Args {
 enum SubCommand {
     #[command(about = "Count the total length of the sequence")]
     Len(LenArgs),
-    #[command(about = "Cut out a part of the sequence")]
-    Slice(SliceArgs),
     #[command(about = "Validate FASTA structure and sequence symbols")]
     Validate(ValidateArgs),
     #[command(about = "Create a FASTA .fai index")]
     Index(IndexArgs),
     #[command(about = "Summarize FASTA sequence statistics")]
     Stats(StatsArgs),
+    #[command(about = "Get FASTA records, ID regions, or global ranges")]
+    Get(GetArgs),
 }
 
 #[derive(Parser)]
@@ -75,6 +75,35 @@ struct StatsArgs {
     sequence_type: StatsSequenceType,
 }
 
+#[derive(Parser)]
+struct GetArgs {
+    /// FASTA file to read
+    input: PathBuf,
+
+    /// Record IDs, ID regions, or global ranges (coordinates are 1-based and inclusive)
+    ids: Vec<String>,
+
+    /// Read IDs or regions from a newline-delimited file
+    #[arg(long = "ids", alias = "ids-file", conflicts_with = "ids")]
+    ids_file: Option<PathBuf>,
+
+    /// Use this FASTA .fai index; defaults to <input>.fai when present
+    #[arg(long)]
+    fai_index: Option<PathBuf>,
+
+    /// Write output to a file instead of standard output
+    #[arg(short, long)]
+    output: Option<PathBuf>,
+
+    /// Sequence alphabet to validate (nucleotide or protein)
+    #[arg(long, value_enum, default_value_t = SequenceType::Nucleotide)]
+    sequence_type: SequenceType,
+
+    /// Number of sequence characters per output line
+    #[arg(long, default_value_t = 60, value_parser = parse_positive_line_width)]
+    chars_per_line: usize,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
 enum StatsFormat {
     #[default]
@@ -108,49 +137,13 @@ struct LenArgs {
     sequence_type: SequenceType,
 }
 
-#[derive(Parser)]
-struct SliceArgs {
-    #[arg(
-        short,
-        long,
-        help = "Specify input file\nIf omitted, read from standard input"
-    )]
-    input: Option<PathBuf>,
-
-    #[arg(
-        long,
-        value_enum,
-        default_value_t = SequenceType::Nucleotide,
-        help = "Sequence alphabet to validate (nucleotide or protein)"
-    )]
+struct GlobalRangeArgs {
+    input: PathBuf,
     sequence_type: SequenceType,
-
-    #[arg(
-        short,
-        long,
-        help = "Specify output file\nIf omitted, write to standard output"
-    )]
     output: Option<PathBuf>,
-
-    #[arg(
-        long,
-        help = "Use a matching FASTA .fai index to read only the selected sequence region"
-    )]
     fai_index: Option<PathBuf>,
-
-    #[arg(
-        long,
-        default_value = "..",
-        help = "Specify slice range\nexamples:\n\t2..10\tmeans [2,10)\n\t2..=10\tmeans [2,10]\n\t..10\tmeans [0,10)\n\t2..\tmeans [2,∞)\n\t..\tmeans [0,∞)\n"
-    )]
-    range: String,
-
-    #[arg(
-        long,
-        default_value_t = 60,
-        value_parser = parse_positive_line_width,
-        help = "Specify the number of characters per line when exporting a sequence"
-    )]
+    start: usize,
+    end_exclusive: usize,
     chars_per_line: usize,
 }
 
@@ -166,7 +159,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match args.sub {
         SubCommand::Len(args) => len(args)?,
-        SubCommand::Slice(args) => slice(args)?,
         SubCommand::Validate(args) => {
             if !validate::run(&args.input, args.sequence_type)? {
                 std::process::exit(1);
@@ -181,6 +173,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         SubCommand::Stats(args) => {
             stats::run(&args.input, args.each, args.format, args.sequence_type)?
         }
+        SubCommand::Get(args) => get::run(args)?,
     }
 
     Ok(())
@@ -330,13 +323,10 @@ fn strip_line_ending(line: &[u8]) -> &[u8] {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+#[cfg(test)]
 struct SequenceRange {
     start: usize,
     end_exclusive: Option<usize>,
-}
-
-fn invalid_range(message: impl Into<String>) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidInput, message.into())
 }
 
 fn ensure_distinct_input_output(input_path: &Path, output_path: &Path) -> io::Result<()> {
@@ -366,57 +356,15 @@ fn ensure_distinct_input_output(input_path: &Path, output_path: &Path) -> io::Re
     Ok(())
 }
 
-fn parse_slice_range(range: &str) -> Result<SequenceRange, io::Error> {
-    let parse_index = |value: &str| {
-        value
-            .parse::<usize>()
-            .map_err(|error| invalid_range(format!("invalid range index: {error}")))
-    };
-    let (start, end) = range
-        .split_once("..")
-        .ok_or_else(|| invalid_range("range must contain `..`"))?;
-    let start = if start.is_empty() {
-        0
-    } else {
-        parse_index(start)?
-    };
-    let end_exclusive = if end.is_empty() {
-        None
-    } else if let Some(inclusive_end) = end.strip_prefix('=') {
-        let inclusive_end = parse_index(inclusive_end)?;
-        if inclusive_end < start {
-            return Err(invalid_range("range end precedes range start"));
-        }
-        // `usize::MAX + 1` cannot be represented, and is equivalent to an open end
-        // because sequence offsets cannot exceed the addressable slice length.
-        inclusive_end.checked_add(1)
-    } else {
-        Some(parse_index(end)?)
-    };
-
-    if end_exclusive.is_some_and(|end| end < start) {
-        return Err(invalid_range("range end precedes range start"));
-    }
-
-    Ok(SequenceRange {
-        start,
-        end_exclusive,
-    })
-}
-
-fn slice(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
-    if args.fai_index.is_some() && args.input.is_none() {
-        return Err(invalid_range("--fai-index requires --input").into());
-    }
-    if let (Some(input), Some(output)) = (&args.input, &args.output) {
-        ensure_distinct_input_output(input, output)?;
+fn write_global_range(args: GlobalRangeArgs) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(output) = &args.output {
+        ensure_distinct_input_output(&args.input, output)?;
     }
     if let (Some(index), Some(output)) = (&args.fai_index, &args.output) {
         ensure_distinct_input_output(index, output)?;
     }
 
-    let range = parse_slice_range(&args.range)?;
-    if let (Some(index_path), Some(input_path)) = (&args.fai_index, &args.input) {
+    if let Some(index_path) = &args.fai_index {
         let mut temporary_output = args
             .output
             .as_deref()
@@ -428,10 +376,10 @@ fn slice(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
         };
         let mut writer = BufWriter::new(output);
         fasta_index::write_slice(
-            input_path,
+            &args.input,
             index_path,
-            range.start,
-            range.end_exclusive,
+            args.start,
+            Some(args.end_exclusive),
             args.chars_per_line,
             args.sequence_type,
             &mut writer,
@@ -446,20 +394,15 @@ fn slice(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     let writer_options = WriterOptions {
         chars_per_line: args.chars_per_line,
-        start: range.start,
-        end_exclusive: range.end_exclusive,
+        start: args.start,
+        end_exclusive: Some(args.end_exclusive),
         sequence_type: args.sequence_type,
     };
 
-    let file_lines = match args.input {
-        Some(input) => {
-            let input = std::fs::OpenOptions::new().read(true).open(input)?;
-            // SAFETY: Input files must remain unchanged for the duration of this command;
-            // this command only reads the file and never modifies it.
-            Some(unsafe { read_lines_from_file(input)? })
-        }
-        None => None,
-    };
+    let input = std::fs::OpenOptions::new().read(true).open(&args.input)?;
+    // SAFETY: Input files must remain unchanged for the duration of this command;
+    // this command only reads the file and never modifies it.
+    let file_lines = unsafe { read_lines_from_file(input)? };
 
     let mut temporary_output = args
         .output
@@ -473,31 +416,7 @@ fn slice(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     let mut writer = Writer::new(output, writer_options);
 
-    let write_result = match file_lines {
-        Some(lines) => writer.run_file(&lines),
-        None => {
-            let (tx, rx) = bounded(LINE_CHANNEL_CAPACITY);
-            let hndl = std::thread::spawn(move || -> Result<(), std::io::Error> {
-                let lines = read_lines_from_stdin();
-                for line in lines {
-                    if tx.send(line).is_err() {
-                        break;
-                    }
-                }
-
-                Ok(())
-            });
-
-            let write_result = writer.run(rx);
-            let read_result = hndl
-                .join()
-                .unwrap_or_else(|_| Err(io::Error::other("input reader thread panicked")));
-            write_result?;
-            read_result?;
-            Ok(())
-        }
-    };
-    write_result?;
+    writer.run_file(&file_lines)?;
     drop(writer);
     if let Some(temporary_output) = &mut temporary_output {
         temporary_output.commit()?;
@@ -527,6 +446,7 @@ impl<T: std::io::Write> Writer<T> {
             written: 0,
         }
     }
+    #[cfg(test)]
     fn run<Buf: AsRef<[u8]>>(
         &mut self,
         rx: Receiver<Result<Buf, io::Error>>,
@@ -629,8 +549,7 @@ impl<T: std::io::Write> Writer<T> {
 mod tests {
     use super::{
         Args, SequenceRange, SequenceType, Writer, WriterOptions, count_sequence_bases,
-        count_sequence_line, parse_slice_range, strip_line_ending, validated_sequence,
-        write_length,
+        count_sequence_line, strip_line_ending, validated_sequence, write_length,
     };
     use clap::Parser;
     use crossbeam::channel::unbounded;
@@ -656,10 +575,9 @@ mod tests {
 
     fn write_fasta_for_range(
         lines: &[&[u8]],
-        range: &str,
+        range: SequenceRange,
         chars_per_line: usize,
     ) -> Result<Vec<u8>, std::io::Error> {
-        let range = parse_slice_range(range)?;
         Ok(write_fasta(
             lines,
             WriterOptions {
@@ -685,101 +603,33 @@ mod tests {
     }
 
     #[test]
-    fn slice_requires_a_positive_line_width() {
-        assert!(Args::try_parse_from(["fasta-util", "slice", "--chars-per-line", "0"]).is_err());
-        assert!(Args::try_parse_from(["fasta-util", "slice", "--chars-per-line", "1"]).is_ok());
-    }
-
-    #[test]
-    fn parses_open_and_bounded_range_forms() {
-        let cases = [
-            (
-                "..",
-                SequenceRange {
-                    start: 0,
-                    end_exclusive: None,
-                },
-            ),
-            (
-                "2..",
-                SequenceRange {
-                    start: 2,
-                    end_exclusive: None,
-                },
-            ),
-            (
-                "..10",
-                SequenceRange {
-                    start: 0,
-                    end_exclusive: Some(10),
-                },
-            ),
-            (
-                "2..10",
-                SequenceRange {
-                    start: 2,
-                    end_exclusive: Some(10),
-                },
-            ),
-            (
-                "2..=10",
-                SequenceRange {
-                    start: 2,
-                    end_exclusive: Some(11),
-                },
-            ),
-        ];
-
-        for (input, expected) in cases {
-            assert_eq!(parse_slice_range(input).unwrap(), expected, "range {input}");
-        }
-    }
-
-    #[test]
-    fn accepts_empty_ranges_without_underflow() {
-        let cases = [
-            (
-                "..0",
-                SequenceRange {
-                    start: 0,
-                    end_exclusive: Some(0),
-                },
-            ),
-            (
-                "2..2",
-                SequenceRange {
-                    start: 2,
-                    end_exclusive: Some(2),
-                },
-            ),
-        ];
-
-        for (input, expected) in cases {
-            assert_eq!(parse_slice_range(input).unwrap(), expected, "range {input}");
-        }
-
-        let max_inclusive = format!("..={}", usize::MAX);
-        assert_eq!(
-            parse_slice_range(&max_inclusive).unwrap(),
-            SequenceRange {
-                start: 0,
-                end_exclusive: None
-            }
+    fn get_requires_a_positive_line_width() {
+        assert!(
+            Args::try_parse_from([
+                "fasta-util",
+                "get",
+                "input.fa",
+                "1-2",
+                "--chars-per-line",
+                "0"
+            ])
+            .is_err()
         );
-    }
-
-    #[test]
-    fn rejects_malformed_and_reversed_ranges_with_input_errors() {
-        for input in [
-            "10", "one..2", "2..=nope", "10..2", "10..=1", "2..=1", "..=",
-        ] {
-            let error = parse_slice_range(input).unwrap_err();
-            assert_eq!(
-                error.kind(),
-                std::io::ErrorKind::InvalidInput,
-                "range {input}"
-            );
-        }
+        assert!(
+            Args::try_parse_from([
+                "fasta-util",
+                "get",
+                "input.fa",
+                "1-2",
+                "--chars-per-line",
+                "1"
+            ])
+            .is_ok()
+        );
+        assert!(
+            Args::try_parse_from(["fasta-util", "get", "input.fa", "--range", "1..2"]).is_err()
+        );
+        assert!(Args::try_parse_from(["fasta-util", "slice"]).is_err());
     }
 
     #[test]
@@ -935,7 +785,15 @@ mod tests {
 
     #[test]
     fn empty_slice_range_writes_no_sequence_bases() {
-        let output = write_fasta_for_range(&[b">record\n", b"ACGT\n"], "..0", 10).unwrap();
+        let output = write_fasta_for_range(
+            &[b">record\n", b"ACGT\n"],
+            SequenceRange {
+                start: 0,
+                end_exclusive: Some(0),
+            },
+            10,
+        )
+        .unwrap();
 
         assert_eq!(output, b">record\n");
     }
@@ -943,8 +801,24 @@ mod tests {
     #[test]
     fn exclusive_and_inclusive_range_text_selects_expected_bases() {
         let input = &[b">record\n".as_slice(), b"ACGTNU\n".as_slice()];
-        let exclusive = write_fasta_for_range(input, "2..4", 10).unwrap();
-        let inclusive = write_fasta_for_range(input, "2..=4", 10).unwrap();
+        let exclusive = write_fasta_for_range(
+            input,
+            SequenceRange {
+                start: 2,
+                end_exclusive: Some(4),
+            },
+            10,
+        )
+        .unwrap();
+        let inclusive = write_fasta_for_range(
+            input,
+            SequenceRange {
+                start: 2,
+                end_exclusive: Some(5),
+            },
+            10,
+        )
+        .unwrap();
 
         assert_eq!(exclusive, b">record\nGT\n");
         assert_eq!(inclusive, b">record\nGTN\n");

@@ -8,7 +8,7 @@ FASTA ファイルを扱うための CLI ツールです。
 
 FASTAは、塩基配列やアミノ酸配列をテキストで表す形式です。各レコードは`>`で始まるヘッダー行から始まり、その次の行以降に配列を記述します。配列は複数行に折り返して記述できます。
 
-`len`と`slice`は、既定で核酸配列を処理します。タンパク質配列を処理する場合は、`--sequence-type protein`を指定してください。1回の実行で扱う配列はすべて同じ種類である必要があります。種別はFASTAの内容から自動判定しません。
+`len`と`get`は、既定で核酸配列を処理します。タンパク質配列を処理する場合は、`--sequence-type protein`を指定してください。1回の実行で扱う配列はすべて同じ種類である必要があります。`stats`は配列種別を自動判定します。
 
 ```fasta
 >record-1 optional description
@@ -18,11 +18,11 @@ UKS-
 MRY
 ```
 
-このツールの`len`はヘッダーと空行を除いて配列記号を数えます。`slice`の位置もヘッダーや行区切りを除いた配列上の位置です。複数レコードの場合、配列をファイル順に連結した位置で範囲を指定します。出力には範囲の終端までに現れたヘッダーを残すため、選択範囲の配列記号がないレコードのヘッダーも含まれることがあります。
+このツールの`len`はヘッダーと空行を除いて配列記号を数えます。`get`の数値範囲は1始まり・両端を含み、複数レコードの配列をファイル順に連結した位置で範囲を指定します。出力には範囲の終端までに現れたヘッダーを残すため、選択範囲の配列記号がないレコードのヘッダーも含まれることがあります。
 
-核酸配列では、大文字・小文字の`ACGTNUKSYMWRBDHV`とギャップを表す`-`を受け付けます。タンパク質配列では、大文字・小文字の標準20アミノ酸記号に加え、`B J O U X Z`、終止記号`*`、ギャップ`-`を受け付けます。どちらの種類でも`slice`は元の大文字・小文字を維持し、許可されていない記号はエラーになります。
+核酸配列では、大文字・小文字の`ACGTNUKSYMWRBDHV`とギャップを表す`-`を受け付けます。タンパク質配列では、大文字・小文字の標準20アミノ酸記号に加え、`B J O U X Z`、終止記号`*`、ギャップ`-`を受け付けます。`get`は元の大文字・小文字を維持し、許可されていない記号はエラーになります。
 
-入力ファイルを使って`len`または通常の`slice`を実行している間は、そのファイルを変更しないでください。`.fai`を使った`slice`の実行中も、FASTA入力とインデックスの両方を変更しないでください。
+入力ファイルを使って`len`または`get`を実行している間は、そのファイルを変更しないでください。`.fai`を使った`get`の実行中も、FASTA入力とインデックスの両方を変更しないでください。
 
 ## ビルド
 
@@ -72,28 +72,17 @@ FASTA全体のレコード数、合計・最小・最大・平均長、N50、GC�
 ./target/release/fasta-util stats proteins.faa --sequence-type protein --format json
 ```
 
-### slice
+### get
 
-配列の一部を切り出します。
-
-`--range`は0始まりのRust範囲記法です。`2..10`は位置2〜9、`2..=10`は位置2〜10を選択します。`..10`は先頭から位置9まで、`2..`は位置2から末尾までを選択します。既定値の`..`は配列全体です。`--chars-per-line`は出力時の折り返し幅で、既定値は60です。
-
-`-o`/`--output`で出力ファイルを指定すると、処理が成功した場合にだけ出力先を置き換えます。入力ファイルと同じファイルは出力先に指定できません。
-
-大きな非圧縮FASTAの中ほどから切り出す場合は、対応する`.fai`インデックスを作成して`--fai-index`に渡すと、選択範囲を直接読み込めます。インデックス作成には`samtools faidx`を使えます。FASTAを変更した場合はインデックスを作り直してください。この経路では選択範囲の配列記号を検証します。
+指定したIDのレコード全体、`ID:開始-終了`形式のレコード内領域、または`開始-終了`形式の全体範囲を取得します。座標は1始まりで両端を含みます。全体範囲は全レコードの配列をファイル順に連結した位置です。複数IDや`--ids`ファイルに対応し、出力はFASTA内の出現順です。入力の隣に`.fai`があれば領域を直接読み込み、なければ先頭から検索します。インデックスを明示する場合は`--fai-index`を指定します。配列の折り返し幅は`--chars-per-line`で指定できます。
 
 ```sh
-./target/release/fasta-util slice -i test.fna --range 99..=199
-./target/release/fasta-util slice --sequence-type protein -i proteins.faa --range 99..=199
-samtools faidx test.fna
-./target/release/fasta-util slice -i test.fna --fai-index test.fna.fai --range 100000000..100000100
-```
-
-```txt
->TestData 10000 random data
-WDCAGVUTRABAKRRNRNHHKTYDNBNTCHMRBRRYHWHKYBHKSBAHVNTCGUMGCMMA
-GYMDSVCYRAMWNURRVTCYYCYCWWHTRCAUVSBUVHMHNWTGKGHGATWMHYTWNSUB
-SUDKUGDWWTSSYBUCKYUDSAADMMRHMT
+./target/release/fasta-util get genome.fa chr1
+./target/release/fasta-util get genome.fa chr1 chr3 chrX
+./target/release/fasta-util get genome.fa --ids chromosomes.txt
+./target/release/fasta-util get genome.fa chr1:1000-2000
+./target/release/fasta-util get genome.fa 1000-2000
+./target/release/fasta-util get genome.fa 1000-2000 --fai-index genome.fa.fai
 ```
 
 ### validate
@@ -113,7 +102,7 @@ FASTAを1回ストリーミングして、ランダムアクセス用の`.fai`�
 
 ```sh
 ./target/release/fasta-util index genome.fa
-./target/release/fasta-util slice -i genome.fa --fai-index genome.fa.fai --range 100000000..100001000
+./target/release/fasta-util get genome.fa 100000001-100001000 --fai-index genome.fa.fai
 ```
 
 ## 簡単なテストとベンチマーク
@@ -135,9 +124,9 @@ cargo bench --bench nucleic_acid -- --input-size 100000 --sample-ms 500
 
 ## 実データのベンチマーク
 
-2026-10-04 に `dataset/ncbi_dataset` 内の RefSeq GRCh38.p14 FASTA を使って測定しました。全ゲノムの長さ計測には705レコードを含む `GCF_000001405.40_GRCh38.p14_genomic.fna`（3,339,739,109 bytes）を使い、slice にはその中の chr1（`NC_000001.11`、248,956,422塩基）を使いました。
+2026-10-04 に `dataset/ncbi_dataset` 内の RefSeq GRCh38.p14 FASTA を使って測定しました。全ゲノムの長さ計測には705レコードを含む `GCF_000001405.40_GRCh38.p14_genomic.fna`（3,339,739,109 bytes）を使い、配列切り出しにはその中の chr1（`NC_000001.11`、248,956,422塩基）を使いました。切り出し値は旧`slice`コマンドで測定した履歴値です。
 
-元データに含まれる小文字のソフトマスク配列を維持したまま測定しました。slice の各ケースでは、計測前に通常の`slice`と`.fai`を使った`slice`の出力がバイト単位で一致することを確認しています。`seqret`がインストールされている場合は、その出力との一致も確認して比較に加えます。
+元データに含まれる小文字のソフトマスク配列を維持したまま測定しました。各ケースでは、計測前に通常経路と`.fai`経路の出力がバイト単位で一致することを確認しています。`seqret`がインストールされている場合は、その出力との一致も確認して比較に加えます。
 
 通常経路と`.fai`経路は2026-10-04に同じCPU・OS・stable Rust・hyperfine環境でベンチマークスクリプトから再測定し、出力一致を確認してから各5回計測しました。`seqret`がなかったため、seqretの値のみ前回測定の結果です。中央から10万塩基を切り出す通常経路では外れ値の警告が出ており、その時間はばらつきが大きい結果です。
 
@@ -152,9 +141,9 @@ cargo bench --bench nucleic_acid -- --input-size 100000 --sample-ms 500
 | `seqkit stats` | 3,298,430,636塩基、705レコード | 2,987 ± 247 ms |
 | `fasta-util len` | 3,298,430,636塩基 | 3,097 ± 487 ms |
 
-### slice
+### get
 
-切り出し範囲は chr1 内の位置です。`seqret` は1始まりの両端包含、本ツールは0始まりの両端包含で指定し、出力は60塩基ごとに折り返しました。
+切り出し範囲は chr1 内の位置です。計測当時の`slice`は0始まり両端包含でした。現在の`get`では同じ領域を1始まり両端包含の`START-END`で指定します。出力は60塩基ごとに折り返しました。
 
 | オフセット | 切り出し長 | seqret（平均 ± 標準偏差） | fasta-util（通常、平均 ± 標準偏差） | fasta-util（FAI、平均 ± 標準偏差） |
 | ---: | ---: | ---: | ---: | ---: |

@@ -8,7 +8,7 @@ A CLI tool for playing with FASTA files
 
 FASTA is a text format for nucleotide or amino acid sequences. Each record starts with a header line beginning with `>`, followed by one or more sequence lines. Sequence data can wrap across multiple lines.
 
-`len` and `slice` process nucleotide sequences by default. To process protein sequences, pass `--sequence-type protein`. Each invocation must process a single sequence type across all records; these commands do not infer it from FASTA contents. `stats` supports automatic sequence type detection.
+`len` and `get` process nucleotide sequences by default. To process protein sequences, pass `--sequence-type protein`. Each invocation must process a single sequence type across all records. `stats` supports automatic sequence type detection.
 
 ```fasta
 >record-1 optional description
@@ -18,11 +18,11 @@ UKS-
 MRY
 ```
 
-`len` counts sequence symbols, excluding headers and blank lines. `slice` positions also count only sequence symbols, excluding headers and line breaks. For multiple records, the range indexes the sequences concatenated in file order. Headers encountered before the range ends are preserved, so the output may include a header for a record that contributes no symbols to the selected range.
+`len` counts sequence symbols, excluding headers and blank lines. Numeric `get` ranges use 1-based inclusive coordinates across the sequences concatenated in file order. Headers encountered before the range ends are preserved, so the output may include a header for a record that contributes no symbols to the selected range.
 
-Nucleotide sequences accept uppercase and lowercase `ACGTNUKSYMWRBDHV` symbols and `-` for a gap. Protein sequences accept uppercase and lowercase symbols for the 20 standard amino acids, plus `B J O U X Z`, the stop marker `*`, and the gap symbol `-`. `slice` preserves the original letter case in both modes. Other symbols are rejected.
+Nucleotide sequences accept uppercase and lowercase `ACGTNUKSYMWRBDHV` symbols and `-` for a gap. Protein sequences accept uppercase and lowercase symbols for the 20 standard amino acids, plus `B J O U X Z`, the stop marker `*`, and the gap symbol `-`. `get` preserves the original letter case in both modes. Other symbols are rejected.
 
-Do not modify an input file while running `len` or non-indexed `slice` against it. While running indexed `slice`, do not modify either the FASTA input or its `.fai` index.
+Do not modify an input file while running `len` or `get`. While running `get` with an index, do not modify either the FASTA input or its `.fai` index.
 
 ## Build
 
@@ -72,28 +72,17 @@ The default `auto` mode selects protein when it finds a protein symbol that is n
 ./target/release/fasta-util stats proteins.faa --sequence-type protein --format json
 ```
 
-### slice
+### get
 
-Cut out a part of the sequence
-
-`--range` uses zero-based Rust range syntax. `2..10` selects positions 2 through 9, while `2..=10` includes position 10. `..10` selects from the beginning through position 9, and `2..` selects from position 2 to the end. The default `..` selects the entire sequence. `--chars-per-line` controls output wrapping and defaults to 60.
-
-When `-o`/`--output` specifies a file, the destination is replaced only after processing succeeds. The input file cannot also be used as the output file.
-
-For a slice from the middle of a large uncompressed FASTA, pass a matching `.fai` index with `--fai-index` to read the selected region directly. Create the index with `samtools faidx`. Rebuild it whenever the FASTA changes. This path validates the sequence symbols in the selected region.
+Get complete records by ID, record regions using `ID:START-END`, or a global range using `START-END`. Coordinates are 1-based and inclusive. Global ranges index all record sequences concatenated in FASTA order. Multiple IDs and an ID file passed with `--ids` are supported; output follows the records' order in the FASTA file. If a `.fai` sidecar exists next to the input, regions are read directly; otherwise, the file is scanned from the beginning. Pass `--fai-index` to use a specific index. Set output wrapping with `--chars-per-line`.
 
 ```sh
-./target/release/fasta-util slice -i test.fna --range 99..=199
-./target/release/fasta-util slice --sequence-type protein -i proteins.faa --range 99..=199
-samtools faidx test.fna
-./target/release/fasta-util slice -i test.fna --fai-index test.fna.fai --range 100000000..100000100
-```
-
-```txt
->TestData 10000 random data
-WDCAGVUTRABAKRRNRNHHKTYDNBNTCHMRBRRYHWHKYBHKSBAHVNTCGUMGCMMA
-GYMDSVCYRAMWNURRVTCYYCYCWWHTRCAUVSBUVHMHNWTGKGHGATWMHYTWNSUB
-SUDKUGDWWTSSYBUCKYUDSAADMMRHMT
+./target/release/fasta-util get genome.fa chr1
+./target/release/fasta-util get genome.fa chr1 chr3 chrX
+./target/release/fasta-util get genome.fa --ids chromosomes.txt
+./target/release/fasta-util get genome.fa chr1:1000-2000
+./target/release/fasta-util get genome.fa 1000-2000
+./target/release/fasta-util get genome.fa 1000-2000 --fai-index genome.fa.fai
 ```
 
 ### validate
@@ -113,7 +102,7 @@ Stream through a FASTA file once and create a `.fai` index for random access. Th
 
 ```sh
 ./target/release/fasta-util index genome.fa
-./target/release/fasta-util slice -i genome.fa --fai-index genome.fa.fai --range 100000000..100001000
+./target/release/fasta-util get genome.fa 100000001-100001000
 ```
 
 ## Simple tests and benchmarks
@@ -137,7 +126,7 @@ cargo bench --bench nucleic_acid -- --input-size 100000 --sample-ms 500
 
 Measurements were taken on 2026-10-04 using the RefSeq GRCh38.p14 FASTA in `dataset/ncbi_dataset`. The full-genome length comparison used `GCF_000001405.40_GRCh38.p14_genomic.fna` (3,339,739,109 bytes), containing 705 records. Slice comparisons used its chromosome 1 record (`NC_000001.11`, 248,956,422 bases).
 
-The benchmark used the source FASTA directly and preserved its lowercase soft-masked sequence. Before timing each slice case, regular `slice` and `.fai` indexed `slice` outputs were verified byte-for-byte. If `seqret` is installed, its output is also verified and included in the comparison.
+The benchmark used the source FASTA directly and preserved its lowercase soft-masked sequence. Before timing each case, regular and `.fai` indexed outputs were verified byte-for-byte. If `seqret` is installed, its output is also verified and included in the comparison. The extraction timings are historical values measured with the former `slice` command.
 
 The regular and `.fai` paths were remeasured by the benchmark script on 2026-10-04 using the same CPU, OS, stable Rust, and hyperfine setup. Their outputs were compared byte-for-byte before five timed runs. `seqret` was unavailable during this remeasurement, so only its values in the table are from the earlier run. Hyperfine reported a statistical outlier for the regular path extracting 100,000 bases from the middle; that result has high variance.
 
@@ -152,9 +141,9 @@ Remeasurement environment: Ubuntu 26.04.1 LTS (WSL2), AMD Ryzen 9 9900X, stable 
 | `seqkit stats` | 3,298,430,636 bases, 705 records | 2,987 ± 247 ms |
 | `fasta-util len` | 3,298,430,636 bases | 3,097 ± 487 ms |
 
-### slice
+### get
 
-Ranges are positions within chromosome 1. `seqret` uses one-based inclusive coordinates; this tool uses zero-based inclusive ranges. Output was wrapped at 60 bases per line.
+Ranges are positions within chromosome 1. The former `slice` command used zero-based inclusive ranges. The current `get` command expresses the same regions with 1-based inclusive `START-END` coordinates. Output was wrapped at 60 bases per line.
 
 | Offset | Slice length | seqret (mean ± standard deviation) | fasta-util (regular, mean ± standard deviation) | fasta-util (FAI, mean ± standard deviation) |
 | ---: | ---: | ---: | ---: | ---: |

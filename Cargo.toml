@@ -1,7 +1,7 @@
 [package]
 name = "fasta-util"
 version = "0.1.0"
-description = "A streaming FASTA CLI for sequence length and slicing"
+description = "A streaming FASTA CLI for sequence analysis and extraction"
 license = "MIT OR Apache-2.0"
 edition = "2024"
 rust-version = "1.88"
@@ -13,8 +13,10 @@ lto = true
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
-crossbeam = "0.8"
 memmap2 = "0.9"
+
+[dev-dependencies]
+crossbeam = "0.8"
 
 [[bench]]
 name = "nucleic_acid"

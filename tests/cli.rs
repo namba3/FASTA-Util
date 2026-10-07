@@ -309,13 +309,11 @@ fn index_writes_standard_fai_rows_for_wrapped_multirecord_input() {
     );
     let slice = run_fasta_util(
         &[
-            "slice",
-            "--input",
+            "get",
             input.path(),
             "--fai-index",
             index_path.to_str().unwrap(),
-            "--range",
-            "2..=5",
+            "3-6",
         ],
         b"",
     );
@@ -343,7 +341,7 @@ fn index_failure_preserves_an_existing_index_file() {
 }
 
 #[test]
-fn index_skips_leading_header_whitespace_and_can_slice_the_result() {
+fn index_skips_leading_header_whitespace_and_supports_get() {
     let input = TemporaryFile::new(b">  seq description\nACGT\n");
     let index_path = PathBuf::from(format!("{}.fai", input.path()));
     let index = run_fasta_util(&["index", input.path()], b"");
@@ -356,13 +354,11 @@ fn index_skips_leading_header_whitespace_and_can_slice_the_result() {
     assert_eq!(fs::read(&index_path).unwrap(), b"seq\t4\t19\t4\t5\n");
     let slice = run_fasta_util(
         &[
-            "slice",
-            "--input",
+            "get",
             input.path(),
             "--fai-index",
             index_path.to_str().unwrap(),
-            "--range",
-            "1..=2",
+            "2-3",
         ],
         b"",
     );
@@ -469,6 +465,272 @@ fn stats_rejects_sequence_data_before_first_record() {
     );
 }
 
+#[test]
+fn get_extracts_requested_records_from_a_multi_fasta() {
+    let input = TemporaryFile::new(b">chr1 description\nACGT\n>chr2\nTTAA\n>chr3 extra\nGGCC\n");
+    let output = run_fasta_util(&["get", input.path(), "chr3", "chr1"], b"");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        output.stdout,
+        b">chr1 description\nACGT\n>chr3 extra\nGGCC\n"
+    );
+}
+
+#[test]
+fn get_reads_ids_from_a_file() {
+    let input = TemporaryFile::new(b">chr1\nACGT\n>chr2\nTTAA\n");
+    let ids = TemporaryFile::new(b"chr2\n\nchr1\n");
+    let output = run_fasta_util(&["get", input.path(), "--ids", ids.path()], b"");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b">chr1\nACGT\n>chr2\nTTAA\n");
+}
+
+#[test]
+fn get_extracts_one_based_inclusive_region_from_streaming_input() {
+    let input = TemporaryFile::new(b">chr1 description\nAACCGGTA\n>chr2\nTTAA\n");
+    let output = run_fasta_util(&["get", input.path(), "chr1:2-5"], b"");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b">chr1:2-5\nACCG\n");
+}
+
+#[test]
+fn get_uses_a_sidecar_fai_for_region_extraction() {
+    let input = TemporaryFile::new(b">chr1 description\nAACCGG\nTTAA\n>chr2\nGGCC\n");
+    let index_path = PathBuf::from(format!("{}.fai", input.path()));
+    let index = run_fasta_util(&["index", input.path()], b"");
+    assert!(index.status.success());
+
+    let output = run_fasta_util(&["get", input.path(), "chr1:3-8"], b"");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b">chr1:3-8\nCCGGTT\n");
+    fs::remove_file(index_path).unwrap();
+}
+
+#[test]
+fn get_uses_a_sidecar_fai_for_global_range_extraction() {
+    let input = TemporaryFile::new(b">first description\nAACG\nTTGC\n>second\nCAAA\n");
+    let index_path = PathBuf::from(format!("{}.fai", input.path()));
+    let index = run_fasta_util(&["index", input.path()], b"");
+    assert!(index.status.success());
+
+    let output = run_fasta_util(&["get", input.path(), "3-10"], b"");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b">first description\nCGTTGC\n>second\nCA\n");
+    fs::remove_file(index_path).unwrap();
+}
+
+#[test]
+fn get_region_coordinates_include_both_ends_and_clip_at_sequence_length() {
+    let input = TemporaryFile::new(b">chr1\nACGT\n");
+    let first = run_fasta_util(&["get", input.path(), "chr1:1-1"], b"");
+    let last = run_fasta_util(&["get", input.path(), "chr1:4-99"], b"");
+
+    assert!(first.status.success());
+    assert_eq!(first.stdout, b">chr1:1-1\nA\n");
+    assert!(last.status.success());
+    assert_eq!(last.stdout, b">chr1:4-99\nT\n");
+}
+
+#[test]
+fn get_region_output_matches_between_streaming_and_explicit_indexed_paths() {
+    let input = TemporaryFile::new(b">chr1 description\r\nAACG\r\nTTGC\r\nCA");
+    let index_path = TemporaryFile::new(b"");
+    let index = run_fasta_util(&["index", input.path()], b"");
+    assert!(
+        index.status.success(),
+        "{}",
+        String::from_utf8_lossy(&index.stderr)
+    );
+    let sidecar = PathBuf::from(format!("{}.fai", input.path()));
+    fs::copy(&sidecar, index_path.path()).unwrap();
+    fs::remove_file(sidecar).unwrap();
+
+    let streamed = run_fasta_util(&["get", input.path(), "chr1:3-8"], b"");
+    let indexed = run_fasta_util(
+        &[
+            "get",
+            input.path(),
+            "chr1:3-8",
+            "--fai-index",
+            index_path.path(),
+        ],
+        b"",
+    );
+
+    assert!(streamed.status.success());
+    assert!(
+        indexed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&indexed.stderr)
+    );
+    assert_eq!(streamed.stdout, b">chr1:3-8\nCGTTGC\n");
+    assert_eq!(indexed.stdout, streamed.stdout);
+}
+
+#[test]
+fn get_wraps_protein_output_and_normalizes_crlf_in_both_paths() {
+    let input = TemporaryFile::new(b">protein description\r\nACDE\r\nFG*\r\n");
+    let index_path = PathBuf::from(format!("{}.fai", input.path()));
+    let index = run_fasta_util(&["index", input.path()], b"");
+    assert!(index.status.success());
+
+    let streamed = run_fasta_util(
+        &[
+            "get",
+            input.path(),
+            "protein",
+            "--sequence-type",
+            "protein",
+            "--chars-per-line",
+            "3",
+        ],
+        b"",
+    );
+    let indexed = run_fasta_util(
+        &[
+            "get",
+            input.path(),
+            "protein",
+            "--sequence-type",
+            "protein",
+            "--chars-per-line",
+            "3",
+            "--fai-index",
+            index_path.to_str().unwrap(),
+        ],
+        b"",
+    );
+
+    assert!(streamed.status.success());
+    assert!(indexed.status.success());
+    assert_eq!(streamed.stdout, b">protein description\nACD\nEFG\n*\n");
+    assert_eq!(indexed.stdout, streamed.stdout);
+    fs::remove_file(index_path).unwrap();
+}
+
+#[test]
+fn get_validates_only_the_selected_region_in_both_paths() {
+    let input = TemporaryFile::new(b">chr1\nACGTZ\n");
+    let index_path = PathBuf::from(format!("{}.fai", input.path()));
+    let index = run_fasta_util(&["index", input.path()], b"");
+    assert!(index.status.success());
+
+    for extra_args in [
+        Vec::<&str>::new(),
+        vec!["--fai-index", index_path.to_str().unwrap()],
+    ] {
+        let valid = run_fasta_util(
+            &[&["get", input.path(), "chr1:1-4"][..], &extra_args].concat(),
+            b"",
+        );
+        let invalid = run_fasta_util(
+            &[&["get", input.path(), "chr1:5-5"][..], &extra_args].concat(),
+            b"",
+        );
+        assert!(valid.status.success());
+        assert_eq!(valid.stdout, b">chr1:1-4\nACGT\n");
+        assert!(!invalid.status.success());
+        assert!(String::from_utf8_lossy(&invalid.stderr).contains("invalid nucleic acid: 'Z'"));
+    }
+    fs::remove_file(index_path).unwrap();
+}
+
+#[test]
+fn get_rejects_bad_region_syntax_and_duplicate_ids_file_entries() {
+    let input = TemporaryFile::new(b">chr1\nACGT\n");
+    let bad_region = run_fasta_util(&["get", input.path(), "chr1:2-"], b"");
+    let ids = TemporaryFile::new(b"chr1\nchr1:2-3\n");
+    let duplicate_ids = run_fasta_util(&["get", input.path(), "--ids", ids.path()], b"");
+
+    assert!(!bad_region.status.success());
+    assert!(String::from_utf8_lossy(&bad_region.stderr).contains("invalid region `chr1:2-`"));
+    assert!(!duplicate_ids.status.success());
+    assert!(String::from_utf8_lossy(&duplicate_ids.stderr).contains("requested more than once"));
+}
+
+#[test]
+fn get_rejects_missing_ids_and_preserves_existing_output() {
+    let input = TemporaryFile::new(b">chr1\nACGT\n");
+    let empty_ids = TemporaryFile::new(b"\n  \n");
+    let output_file = TemporaryFile::new(b"existing output\n");
+    let no_queries = run_fasta_util(&["get", input.path(), "--ids", empty_ids.path()], b"");
+    let missing_region = run_fasta_util(
+        &[
+            "get",
+            input.path(),
+            "missing:1-2",
+            "--output",
+            output_file.path(),
+        ],
+        b"",
+    );
+
+    assert!(!no_queries.status.success());
+    assert!(String::from_utf8_lossy(&no_queries.stderr).contains("provide one or more"));
+    assert!(!missing_region.status.success());
+    assert!(
+        String::from_utf8_lossy(&missing_region.stderr).contains("record `missing` was not found")
+    );
+    assert_eq!(output_file.read(), b"existing output\n");
+}
+
+#[test]
+fn get_missing_id_does_not_replace_an_output_file() {
+    let input = TemporaryFile::new(b">chr1\nACGT\n");
+    let output_file = TemporaryFile::new(b"existing output\n");
+    let output = run_fasta_util(
+        &[
+            "get",
+            input.path(),
+            "missing",
+            "--output",
+            output_file.path(),
+        ],
+        b"",
+    );
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("record `missing` was not found"));
+    assert_eq!(output_file.read(), b"existing output\n");
+}
+
+#[test]
+fn get_rejects_duplicate_record_ids() {
+    let input = TemporaryFile::new(b">chr1\nACGT\n");
+    let output = run_fasta_util(&["get", input.path(), "chr1", "chr1:2-3"], b"");
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("record `chr1` is requested more than once")
+    );
+}
+
 #[cfg(unix)]
 fn temporary_non_utf8_file(contents: &[u8]) -> TemporaryFile {
     use std::os::unix::ffi::OsStringExt;
@@ -545,18 +807,19 @@ fn len_counts_protein_symbols_from_stdin() {
 }
 
 #[test]
-fn slice_handles_protein_symbols_and_preserves_case() {
+fn get_handles_protein_symbols_and_preserves_case() {
+    let input = TemporaryFile::new(b">protein\nacDEFGHIK*\n");
     let output = run_fasta_util(
         &[
-            "slice",
+            "get",
+            input.path(),
             "--sequence-type",
             "protein",
-            "--range",
-            "2..=8",
+            "3-9",
             "--chars-per-line",
             "4",
         ],
-        b">protein\nacDEFGHIK*\n",
+        b"",
     );
 
     assert!(output.status.success());
@@ -565,32 +828,28 @@ fn slice_handles_protein_symbols_and_preserves_case() {
 }
 
 #[test]
-fn indexed_protein_slice_matches_streaming_slice() {
+fn indexed_protein_get_matches_streaming_get() {
     let input = TemporaryFile::new(b">protein description\nACDE\nBZJU\nOX*-\n");
     let index = TemporaryFile::new(b"protein\t12\t21\t4\t5\n");
     let args = [
-        "slice",
+        "get",
         "--sequence-type",
         "protein",
-        "--input",
         input.path(),
-        "--range",
-        "2..=10",
+        "3-11",
         "--chars-per-line",
         "4",
     ];
     let normal = run_fasta_util(&args, b"");
     let indexed = run_fasta_util(
         &[
-            "slice",
+            "get",
             "--sequence-type",
             "protein",
-            "--input",
             input.path(),
             "--fai-index",
             index.path(),
-            "--range",
-            "2..=10",
+            "3-11",
             "--chars-per-line",
             "4",
         ],
@@ -620,11 +879,9 @@ fn protein_mode_rejects_non_protein_symbols() {
 }
 
 #[test]
-fn slice_writes_selected_sequence_from_stdin() {
-    let output = run_fasta_util(
-        &["slice", "--range", "2..=4", "--chars-per-line", "2"],
-        b">record\nACGT\nNU-\n",
-    );
+fn get_writes_selected_global_range_to_stdout() {
+    let input = TemporaryFile::new(b">record\nACGT\nNU-\n");
+    let output = run_fasta_util(&["get", input.path(), "3-5", "--chars-per-line", "2"], b"");
 
     assert!(output.status.success());
     assert_eq!(output.stdout, b">record\nGT\nN\n");
@@ -632,46 +889,79 @@ fn slice_writes_selected_sequence_from_stdin() {
 }
 
 #[test]
-fn slice_reads_a_crlf_file_and_writes_normalized_fasta_to_a_file() {
+fn get_global_range_crosses_record_boundaries_and_preserves_each_header() {
+    let input = TemporaryFile::new(b">first description\nACGT\n>second description\nTGCA\n");
+    let output = run_fasta_util(&["get", input.path(), "3-6"], b"");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        output.stdout,
+        b">first description\nGT\n>second description\nTG\n"
+    );
+}
+
+#[test]
+fn get_rejects_invalid_or_combined_global_ranges() {
+    let input = TemporaryFile::new(b">first\nACGT\n>second\nTGCA\n");
+
+    for range in ["0-2", "4-3", "1-"] {
+        let output = run_fasta_util(&["get", input.path(), range], b"");
+
+        assert!(
+            !output.status.success(),
+            "range {range} unexpectedly passed"
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("invalid global range"),
+            "range {range}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let combined = run_fasta_util(&["get", input.path(), "1-2", "first"], b"");
+    assert!(!combined.status.success());
+    assert!(
+        String::from_utf8_lossy(&combined.stderr)
+            .contains("a global range cannot be combined with record IDs")
+    );
+}
+
+#[test]
+fn get_reads_a_crlf_file_and_writes_normalized_fasta_to_a_file() {
     let input = TemporaryFile::new(b">first\r\nACGT\r\n>second\r\nNU-\r\n");
     let output_file = TemporaryFile::new(b"old contents");
     let output = run_fasta_util(
-        &[
-            "slice",
-            "--input",
-            input.path(),
-            "--output",
-            output_file.path(),
-        ],
+        &["get", input.path(), "1-7", "--output", output_file.path()],
         b"",
     );
 
     assert!(output.status.success());
     assert!(output.stdout.is_empty());
     assert!(output.stderr.is_empty());
-    assert_eq!(output_file.read(), b">first\nACGT\n>second\nNU-");
+    assert_eq!(output_file.read(), b">first\nACGT\n>second\nNU-\n");
 }
 
 #[test]
-fn indexed_slice_matches_streaming_slice_for_wrapped_multi_record_fasta() {
+fn indexed_get_matches_streaming_get_for_wrapped_multi_record_fasta() {
     let (input, index) = indexed_fasta_fixture();
     let cases = [
-        ("..", "2"),
-        ("0..0", "4"),
-        ("3..=9", "4"),
-        ("8..=8", "3"),
-        ("10..14", "5"),
-        ("14..", "4"),
-        ("99..", "4"),
+        ("1-14", "2"),
+        ("4-10", "4"),
+        ("9-9", "3"),
+        ("11-14", "5"),
+        ("15-15", "4"),
+        ("100-100", "4"),
     ];
 
     for (range, chars_per_line) in cases {
         let normal = run_fasta_util(
             &[
-                "slice",
-                "--input",
+                "get",
                 input.path(),
-                "--range",
                 range,
                 "--chars-per-line",
                 chars_per_line,
@@ -680,12 +970,10 @@ fn indexed_slice_matches_streaming_slice_for_wrapped_multi_record_fasta() {
         );
         let indexed = run_fasta_util(
             &[
-                "slice",
-                "--input",
+                "get",
                 input.path(),
                 "--fai-index",
                 index.path(),
-                "--range",
                 range,
                 "--chars-per-line",
                 chars_per_line,
@@ -708,7 +996,7 @@ fn indexed_slice_matches_streaming_slice_for_wrapped_multi_record_fasta() {
 }
 
 #[test]
-fn indexed_slice_matches_streaming_across_record_layouts_and_line_endings() {
+fn indexed_get_matches_streaming_across_record_layouts_and_line_endings() {
     let records = [
         ("empty", b"".as_slice(), 4),
         ("single", b"a".as_slice(), 4),
@@ -717,7 +1005,7 @@ fn indexed_slice_matches_streaming_across_record_layouts_and_line_endings() {
         ("long", b"ACGTagctN-".as_slice(), 4),
         ("last", b"u".as_slice(), 1),
     ];
-    let ranges = ["..", "0..=0", "1..=4", "3..=9", "8..=17", "20.."];
+    let ranges = ["1-21", "1-1", "2-5", "4-10", "9-18", "21-21"];
     let line_widths = ["1", "3", "8"];
 
     for line_ending in [b"\n".as_slice(), b"\r\n".as_slice()] {
@@ -725,25 +1013,15 @@ fn indexed_slice_matches_streaming_across_record_layouts_and_line_endings() {
         for range in ranges {
             for line_width in line_widths {
                 let normal = run_fasta_util(
-                    &[
-                        "slice",
-                        "--input",
-                        input.path(),
-                        "--range",
-                        range,
-                        "--chars-per-line",
-                        line_width,
-                    ],
+                    &["get", input.path(), range, "--chars-per-line", line_width],
                     b"",
                 );
                 let indexed = run_fasta_util(
                     &[
-                        "slice",
-                        "--input",
+                        "get",
                         input.path(),
                         "--fai-index",
                         index.path(),
-                        "--range",
                         range,
                         "--chars-per-line",
                         line_width,
@@ -760,7 +1038,7 @@ fn indexed_slice_matches_streaming_across_record_layouts_and_line_endings() {
 }
 
 #[test]
-fn indexed_slice_reads_headers_longer_than_the_header_scan_buffer() {
+fn indexed_get_reads_headers_longer_than_the_header_scan_buffer() {
     let first_header = b">previous\n";
     let second_name = "longname".repeat(800);
     let second_header = format!(">{second_name} long description\n");
@@ -776,15 +1054,9 @@ fn indexed_slice_reads_headers_longer_than_the_header_scan_buffer() {
             .as_bytes(),
     );
 
-    let normal = run_fasta_util(&["slice", "--input", input.path()], b"");
+    let normal = run_fasta_util(&["get", input.path(), "1-6"], b"");
     let indexed = run_fasta_util(
-        &[
-            "slice",
-            "--input",
-            input.path(),
-            "--fai-index",
-            index.path(),
-        ],
+        &["get", input.path(), "--fai-index", index.path(), "1-6"],
         b"",
     );
 
@@ -794,7 +1066,7 @@ fn indexed_slice_reads_headers_longer_than_the_header_scan_buffer() {
 }
 
 #[test]
-fn indexed_slice_matches_streaming_slice_across_read_buffer_chunks() {
+fn indexed_get_matches_streaming_get_across_read_buffer_chunks() {
     let mut fasta = b">long\n".to_vec();
     let sequence = (0..150_123)
         .map(|index| b"ACGTacgt"[index % 8])
@@ -807,15 +1079,13 @@ fn indexed_slice_matches_streaming_slice_across_read_buffer_chunks() {
     }
     let input = TemporaryFile::new(&fasta);
     let index = TemporaryFile::new(b"long\t150123\t6\t60\t61\n");
-    let cases = [("57..70031", "73"), ("65510..=140007", "61")];
+    let cases = [("58-70031", "73"), ("65511-140008", "61")];
 
     for (range, chars_per_line) in cases {
         let normal = run_fasta_util(
             &[
-                "slice",
-                "--input",
+                "get",
                 input.path(),
-                "--range",
                 range,
                 "--chars-per-line",
                 chars_per_line,
@@ -824,12 +1094,10 @@ fn indexed_slice_matches_streaming_slice_across_read_buffer_chunks() {
         );
         let indexed = run_fasta_util(
             &[
-                "slice",
-                "--input",
+                "get",
                 input.path(),
                 "--fai-index",
                 index.path(),
-                "--range",
                 range,
                 "--chars-per-line",
                 chars_per_line,
@@ -847,19 +1115,11 @@ fn indexed_slice_matches_streaming_slice_across_read_buffer_chunks() {
 }
 
 #[test]
-fn indexed_slice_validates_only_selected_sequence_bases() {
+fn indexed_get_validates_only_selected_sequence_bases() {
     let input = TemporaryFile::new(b">record description\nACXT\n");
     let index = TemporaryFile::new(b"record\t4\t20\t4\t5\n");
     let output = run_fasta_util(
-        &[
-            "slice",
-            "--input",
-            input.path(),
-            "--fai-index",
-            index.path(),
-            "--range",
-            "0..2",
-        ],
+        &["get", input.path(), "--fai-index", index.path(), "1-2"],
         b"",
     );
 
@@ -868,19 +1128,19 @@ fn indexed_slice_validates_only_selected_sequence_bases() {
 }
 
 #[test]
-fn indexed_slice_rejects_mismatched_index_without_replacing_output() {
+fn indexed_get_rejects_mismatched_index_without_replacing_output() {
     let (input, _) = indexed_fasta_fixture();
     let index = TemporaryFile::new(b"wrong-name\t8\t35\t4\t6\n");
     let output_file = TemporaryFile::new(b"keep this output");
     let output = run_fasta_util(
         &[
-            "slice",
-            "--input",
+            "get",
             input.path(),
             "--fai-index",
             index.path(),
             "--output",
             output_file.path(),
+            "wrong-name:1-8",
         ],
         b"",
     );
@@ -891,18 +1151,18 @@ fn indexed_slice_rejects_mismatched_index_without_replacing_output() {
 }
 
 #[test]
-fn indexed_slice_rejects_index_as_output_without_changing_it() {
+fn indexed_get_rejects_index_as_output_without_changing_it() {
     let (input, index) = indexed_fasta_fixture();
     let original_index = index.read();
     let output = run_fasta_util(
         &[
-            "slice",
-            "--input",
+            "get",
             input.path(),
             "--fai-index",
             index.path(),
             "--output",
             index.path(),
+            "empty:1-1",
         ],
         b"",
     );
@@ -914,7 +1174,7 @@ fn indexed_slice_rejects_index_as_output_without_changing_it() {
 
 #[cfg(unix)]
 #[test]
-fn indexed_slice_rejects_linked_index_outputs_without_changing_the_index() {
+fn indexed_get_rejects_linked_index_outputs_without_changing_the_index() {
     let (input, index) = indexed_fasta_fixture();
     let original_index = index.read();
 
@@ -929,13 +1189,13 @@ fn indexed_slice_rejects_linked_index_outputs_without_changing_the_index() {
 
         let output = run_fasta_util(
             &[
-                "slice",
-                "--input",
+                "get",
                 input.path(),
                 "--fai-index",
                 index.path(),
                 "--output",
                 output_alias.path(),
+                "empty:1-1",
             ],
             b"",
         );
@@ -951,7 +1211,7 @@ fn indexed_slice_rejects_linked_index_outputs_without_changing_the_index() {
 }
 
 #[test]
-fn indexed_slice_rejects_malformed_and_out_of_bounds_indexes() {
+fn indexed_get_rejects_malformed_and_out_of_bounds_indexes() {
     let (input, _) = indexed_fasta_fixture();
     for contents in [
         &b"record\t4\t7\t4\n"[..],
@@ -963,11 +1223,11 @@ fn indexed_slice_rejects_malformed_and_out_of_bounds_indexes() {
         let index = TemporaryFile::new(contents);
         let output = run_fasta_util(
             &[
-                "slice",
-                "--input",
+                "get",
                 input.path(),
                 "--fai-index",
                 index.path(),
+                "record:1-1",
             ],
             b"",
         );
@@ -977,24 +1237,26 @@ fn indexed_slice_rejects_malformed_and_out_of_bounds_indexes() {
 }
 
 #[test]
-fn indexed_slice_requires_a_file_input() {
+fn get_requires_a_fasta_input() {
     let index = TemporaryFile::new(b"record\t4\t7\t4\t4\n");
-    let output = run_fasta_util(&["slice", "--fai-index", index.path()], b"");
+    let output = run_fasta_util(&["get", "--fai-index", index.path()], b"");
 
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("--fai-index requires --input"));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("required arguments were not provided")
+    );
 }
 
 #[cfg(unix)]
 #[test]
-fn slice_accepts_a_non_utf8_output_path() {
+fn get_accepts_a_non_utf8_output_path() {
     let input = TemporaryFile::new(b">record\nACGT\n");
     let output_file = temporary_non_utf8_file(b"old contents");
     let output = run_fasta_util_with(b"", |command| {
         command
-            .arg("slice")
-            .arg("--input")
+            .arg("get")
             .arg(&input.0)
+            .arg("record")
             .arg("--output")
             .arg(&output_file.0);
     });
@@ -1002,21 +1264,15 @@ fn slice_accepts_a_non_utf8_output_path() {
     assert!(output.status.success());
     assert!(output.stdout.is_empty());
     assert!(output.stderr.is_empty());
-    assert_eq!(output_file.read(), b">record\nACGT");
+    assert_eq!(output_file.read(), b">record\nACGT\n");
 }
 
 #[test]
-fn slice_keeps_existing_output_when_input_validation_fails_after_partial_output() {
+fn get_keeps_existing_output_when_input_validation_fails_after_partial_output() {
     let input = TemporaryFile::new(b">record\nACGT\nACX\n");
     let output_file = TemporaryFile::new(b"previous output");
     let output = run_fasta_util(
-        &[
-            "slice",
-            "--input",
-            input.path(),
-            "--output",
-            output_file.path(),
-        ],
+        &["get", input.path(), "1-7", "--output", output_file.path()],
         b"",
     );
 
@@ -1027,9 +1283,9 @@ fn slice_keeps_existing_output_when_input_validation_fails_after_partial_output(
 }
 
 #[test]
-fn bounded_file_slice_stops_before_invalid_sequence_after_the_range() {
+fn bounded_global_get_stops_before_invalid_sequence_after_the_range() {
     let input = TemporaryFile::new(b">record\nACGT\nACX\n");
-    let output = run_fasta_util(&["slice", "--input", input.path(), "--range", "0..2"], b"");
+    let output = run_fasta_util(&["get", input.path(), "1-2"], b"");
 
     assert!(output.status.success(), "{output:?}");
     assert!(output.stderr.is_empty());
@@ -1037,19 +1293,13 @@ fn bounded_file_slice_stops_before_invalid_sequence_after_the_range() {
 }
 
 #[test]
-fn slice_does_not_create_output_when_input_validation_fails() {
+fn get_does_not_create_output_when_input_validation_fails() {
     let input = TemporaryFile::new(b">record\nACX\n");
     let output_file = TemporaryFile::new(b"remove me");
     fs::remove_file(&output_file.0).unwrap();
 
     let output = run_fasta_util(
-        &[
-            "slice",
-            "--input",
-            input.path(),
-            "--output",
-            output_file.path(),
-        ],
+        &["get", input.path(), "1-3", "--output", output_file.path()],
         b"",
     );
 
@@ -1059,12 +1309,9 @@ fn slice_does_not_create_output_when_input_validation_fails() {
 }
 
 #[test]
-fn slice_rejects_same_input_and_output_file_without_changing_it() {
+fn get_rejects_same_input_and_output_file_without_changing_it() {
     let input = TemporaryFile::new(b">record\nACGT\n");
-    let output = run_fasta_util(
-        &["slice", "--input", input.path(), "--output", input.path()],
-        b"",
-    );
+    let output = run_fasta_util(&["get", input.path(), "1-4", "--output", input.path()], b"");
 
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("same file"));
