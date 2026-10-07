@@ -133,7 +133,8 @@ impl SingleWordShiftAndState {
 }
 
 struct MultiWordShiftAndState {
-    matching_positions: [Vec<u64>; 17],
+    matching_positions: Vec<u64>,
+    word_count: usize,
     mode: MultiWordMode,
     max_mismatch: usize,
     final_word: usize,
@@ -153,13 +154,13 @@ enum MultiWordMode {
 impl MultiWordShiftAndState {
     fn new(pattern: &[u8], max_mismatch: usize) -> Self {
         let word_count = pattern.len().div_ceil(u64::BITS as usize);
-        let mut matching_positions = std::array::from_fn(|_| vec![0u64; word_count]);
+        let mut matching_positions = vec![0u64; 17 * word_count];
         for (index, pattern_mask) in pattern.iter().copied().enumerate() {
             let word = index / u64::BITS as usize;
             let position = 1u64 << (index % u64::BITS as usize);
-            for (sequence_mask, words) in matching_positions.iter_mut().enumerate().skip(1) {
+            for sequence_mask in 1..=16 {
                 if pattern_mask & sequence_mask as u8 != 0 {
-                    words[word] |= position;
+                    matching_positions[sequence_mask * word_count + word] |= position;
                 }
             }
         }
@@ -175,6 +176,7 @@ impl MultiWordShiftAndState {
         };
         Self {
             matching_positions,
+            word_count,
             mode,
             max_mismatch,
             final_word: (pattern.len() - 1) / u64::BITS as usize,
@@ -196,7 +198,8 @@ impl MultiWordShiftAndState {
     }
 
     fn advance(&mut self, sequence_mask: u8) -> bool {
-        let matching_positions = &self.matching_positions[sequence_mask as usize];
+        let start = sequence_mask as usize * self.word_count;
+        let matching_positions = &self.matching_positions[start..start + self.word_count];
         let max_mismatch = self.max_mismatch;
         let final_word = self.final_word;
         let final_position = self.final_position;
@@ -455,6 +458,27 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn multiword_matching_table_handles_all_iupac_masks_and_gap() {
+        let pattern = [0b1111; 65];
+        let reverse_pattern = [0b1111; 65];
+        let mut matcher = BitParallelMatcher::new(&pattern, &reverse_pattern, 3);
+
+        for sequence_mask in 1..=16 {
+            matcher.reset();
+            let mut actual = (false, false);
+            for _ in 0..pattern.len() {
+                actual = matcher.advance(sequence_mask);
+            }
+            let expected = if sequence_mask == 16 {
+                (false, false)
+            } else {
+                (true, true)
+            };
+            assert_eq!(actual, expected, "sequence mask {sequence_mask}");
         }
     }
 
