@@ -109,17 +109,19 @@ The recorded run used a deterministic 20-million-base FASTA with 533 records of 
 
 SeqKit's default parallelism is four threads; `fasta-util` processes these inputs in its streaming path. The commands use each tool's normal defaults otherwise. `stats`/`stats --all` calculate overlapping but not identical metric sets, and `len` versus `seqkit stats` compares only the total-length metric. `validate` and `composition` are not included because there is no direct SeqKit command with the same output contract. SeqKit documents the corresponding `stats`, `seq`, `grep`, `locate`, and `faidx` operations in its [usage guide](https://bioinf.shenwei.me/seqkit/usage/).
 
+The latest run includes a performance pass that reduces repeated per-base checks in `stats` and `filter`, avoids unneeded GC/N counting for length-only filtering, uses a lookup table for reverse complementation, and copies unchanged `format` sequence data in chunks. In same-host before/after measurements, `filter` changed from 106.8 ms to 39.2 ms, `revcomp` from 149.7 ms to 60.9 ms, and `format` from 54.5 ms to 28.2 ms. `stats` changed from 111.6 ms to 88.0 ms; it remains slower than SeqKit in this run, though the commands calculate different metric sets and SeqKit uses four threads. Benchmark results vary with machine load.
+
 | Operation | `fasta-util` | SeqKit | Mean ± σ |
 | --- | ---: | ---: | ---: |
-| Total length | `len` | `stats` (`sum_len` only) | 14.7 ± 0.5 ms / 36.2 ± 2.6 ms |
-| Summary statistics | `stats` | `stats --all` | 80.9 ± 1.2 ms / 63.7 ± 2.7 ms |
-| Length filter (min 40 kb) | `filter` | `seq --min-len 40000` | 96.7 ± 4.6 ms / 36.0 ± 2.1 ms |
-| Reverse complement | `revcomp` | `seq --reverse --complement` | 146.6 ± 2.6 ms / 106.0 ± 6.3 ms |
-| Header search | `grep` | `grep --by-name --use-regexp` | 15.0 ± 1.4 ms / 43.4 ± 1.4 ms |
-| Motif location (`ACGA`) | `locate` | `locate` | 127.4 ± 8.6 ms / 133.1 ± 7.3 ms |
-| Rewrap to width 80 | `format` | `seq --line-width 80` | 35.9 ± 1.2 ms / 32.8 ± 1.7 ms |
-| Indexed extraction (10 kb) | `get` | `faidx` | 1.5 ± 0.3 ms / 18.6 ± 1.5 ms |
-| Index creation | `index` | `faidx --update-faidx` | 14.2 ± 0.7 ms / 48.3 ± 3.0 ms |
+| Total length | `len` | `stats` (`sum_len` only) | 15.3 ± 1.6 ms / 31.1 ± 2.5 ms |
+| Summary statistics | `stats` | `stats --all` | 88.0 ± 6.0 ms / 73.6 ± 5.4 ms |
+| Length filter (min 40 kb) | `filter` | `seq --min-len 40000` | 39.2 ± 3.3 ms / 37.2 ± 1.1 ms |
+| Reverse complement | `revcomp` | `seq --reverse --complement` | 60.9 ± 1.1 ms / 102.7 ± 4.7 ms |
+| Header search | `grep` | `grep --by-name --use-regexp` | 19.7 ± 1.0 ms / 48.1 ± 0.5 ms |
+| Motif location (`ACGA`) | `locate` | `locate` | 113.7 ± 3.0 ms / 143.4 ± 3.2 ms |
+| Rewrap to width 80 | `format` | `seq --line-width 80` | 28.2 ± 2.3 ms / 40.7 ± 4.9 ms |
+| Indexed extraction (10 kb) | `get` | `faidx` | 2.3 ± 0.3 ms / 22.2 ± 1.6 ms |
+| Index creation | `index` | `faidx --update-faidx` | 16.1 ± 1.5 ms / 50.6 ± 2.4 ms |
 
 The indexed extraction result for `fasta-util` is below 5 ms, where hyperfine warns that shell startup calibration limits timing accuracy. Results are environment-sensitive and should not be treated as a universal ranking.
 

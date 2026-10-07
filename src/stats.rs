@@ -141,6 +141,8 @@ impl StatsCollector {
         };
 
         let sequence = line;
+        let mut line_gc = 0u64;
+        let mut line_n = 0u64;
         for (index, byte) in sequence.iter().copied().enumerate() {
             if byte.is_ascii_whitespace() {
                 return Err(stats_error(
@@ -149,10 +151,16 @@ impl StatsCollector {
                 ));
             }
 
-            let valid = match self.sequence_type {
-                StatsSequenceType::Nucleotide => is_nucleic_acid(byte),
-                StatsSequenceType::Protein => is_amino_acid(byte),
-                StatsSequenceType::Auto => is_amino_acid(byte),
+            let (is_nucleic, valid) = match self.sequence_type {
+                StatsSequenceType::Nucleotide => {
+                    let is_nucleic = is_nucleic_acid(byte);
+                    (is_nucleic, is_nucleic)
+                }
+                StatsSequenceType::Protein => (false, is_amino_acid(byte)),
+                StatsSequenceType::Auto => {
+                    let is_nucleic = is_nucleic_acid(byte);
+                    (is_nucleic, is_nucleic || is_amino_acid(byte))
+                }
             };
             if !valid {
                 let kind = match self.sequence_type {
@@ -165,22 +173,33 @@ impl StatsCollector {
                 ));
             }
 
-            if byte == b'G' || byte == b'g' || byte == b'C' || byte == b'c' {
-                counts.gc = checked_add(counts.gc, 1, line_number, "GC count overflow")?;
+            if matches!(byte, b'G' | b'g' | b'C' | b'c') {
+                line_gc += 1;
             }
-            if byte == b'N' || byte == b'n' {
-                counts.n = checked_add(counts.n, 1, line_number, "N count overflow")?;
+            if matches!(byte, b'N' | b'n') {
+                line_n += 1;
             }
-            if byte == b'T' || byte == b't' {
-                self.summary.saw_t = true;
-            } else if byte == b'U' || byte == b'u' {
-                self.summary.saw_u = true;
+            if self.sequence_type != StatsSequenceType::Protein {
+                if byte == b'T' || byte == b't' {
+                    self.summary.saw_t = true;
+                } else if byte == b'U' || byte == b'u' {
+                    self.summary.saw_u = true;
+                }
             }
-            if self.sequence_type == StatsSequenceType::Auto && !is_nucleic_acid(byte) {
+            if self.sequence_type == StatsSequenceType::Auto && !is_nucleic {
                 self.summary.saw_protein_only = true;
             }
-            counts.length = checked_add(counts.length, 1, line_number, "sequence length overflow")?;
         }
+        let line_length = u64::try_from(sequence.len())
+            .map_err(|_| stats_error(line_number, "sequence length overflow"))?;
+        counts.length = checked_add(
+            counts.length,
+            line_length,
+            line_number,
+            "sequence length overflow",
+        )?;
+        counts.gc = checked_add(counts.gc, line_gc, line_number, "GC count overflow")?;
+        counts.n = checked_add(counts.n, line_n, line_number, "N count overflow")?;
         Ok(())
     }
 

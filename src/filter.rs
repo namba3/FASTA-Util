@@ -79,6 +79,8 @@ fn select_records(lines: &LinesInFile, args: &FilterArgs) -> io::Result<Selectio
     let mut current: Option<Counts> = None;
     let mut saw_record = false;
     let mut saw_protein_only = false;
+    let count_gc = args.min_gc.is_some() || args.max_gc.is_some();
+    let count_n = args.max_n.is_some();
 
     lines.try_for_each_line(|line_number, raw_line| {
         let line = strip_line_ending(raw_line);
@@ -104,6 +106,8 @@ fn select_records(lines: &LinesInFile, args: &FilterArgs) -> io::Result<Selectio
             ));
         };
 
+        let mut line_gc = 0u64;
+        let mut line_n = 0u64;
         for (index, byte) in line.iter().copied().enumerate() {
             if byte.is_ascii_whitespace() {
                 return Err(line_error(
@@ -111,11 +115,18 @@ fn select_records(lines: &LinesInFile, args: &FilterArgs) -> io::Result<Selectio
                     &format!("whitespace in sequence at column {}", index + 1),
                 ));
             }
-            let valid = match args.sequence_type {
-                StatsSequenceType::Nucleotide => is_nucleic_acid(byte),
-                StatsSequenceType::Protein | StatsSequenceType::Auto => is_amino_acid(byte),
+            let (is_nucleic, valid) = match args.sequence_type {
+                StatsSequenceType::Nucleotide => {
+                    let is_nucleic = is_nucleic_acid(byte);
+                    (is_nucleic, is_nucleic)
+                }
+                StatsSequenceType::Protein => (false, is_amino_acid(byte)),
+                StatsSequenceType::Auto => {
+                    let is_nucleic = is_nucleic_acid(byte);
+                    (is_nucleic, is_nucleic || is_amino_acid(byte))
+                }
             };
-            if args.sequence_type == StatsSequenceType::Auto && !is_nucleic_acid(byte) {
+            if args.sequence_type == StatsSequenceType::Auto && !is_nucleic {
                 saw_protein_only = true;
             }
             if !valid {
@@ -128,23 +139,28 @@ fn select_records(lines: &LinesInFile, args: &FilterArgs) -> io::Result<Selectio
                     &format!("invalid {kind} symbol '{}'", char::from(byte)),
                 ));
             }
-            counts.length = counts
-                .length
-                .checked_add(1)
-                .ok_or_else(|| line_error(line_number, "sequence length overflow"))?;
-            if matches!(byte, b'G' | b'g' | b'C' | b'c') {
-                counts.gc = counts
-                    .gc
-                    .checked_add(1)
-                    .ok_or_else(|| line_error(line_number, "GC count overflow"))?;
+            if count_gc && matches!(byte, b'G' | b'g' | b'C' | b'c') {
+                line_gc += 1;
             }
-            if matches!(byte, b'N' | b'n') {
-                counts.n = counts
-                    .n
-                    .checked_add(1)
-                    .ok_or_else(|| line_error(line_number, "N count overflow"))?;
+            if count_n && matches!(byte, b'N' | b'n') {
+                line_n += 1;
             }
         }
+        counts.length = counts
+            .length
+            .checked_add(
+                u64::try_from(line.len())
+                    .map_err(|_| line_error(line_number, "sequence length overflow"))?,
+            )
+            .ok_or_else(|| line_error(line_number, "sequence length overflow"))?;
+        counts.gc = counts
+            .gc
+            .checked_add(line_gc)
+            .ok_or_else(|| line_error(line_number, "GC count overflow"))?;
+        counts.n = counts
+            .n
+            .checked_add(line_n)
+            .ok_or_else(|| line_error(line_number, "N count overflow"))?;
         Ok(())
     })?;
 

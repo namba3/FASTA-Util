@@ -10,6 +10,45 @@ use std::{
 };
 
 const REVERSE_READ_SIZE: usize = 64 * 1024;
+const DNA_COMPLEMENT: [u8; 256] = complement_table(false);
+const RNA_COMPLEMENT: [u8; 256] = complement_table(true);
+
+const fn complement_table(is_rna: bool) -> [u8; 256] {
+    let mut table = [0; 256];
+    let mut byte = 0;
+    while byte < table.len() {
+        table[byte] = byte as u8;
+        byte += 1;
+    }
+
+    table[b'A' as usize] = if is_rna { b'U' } else { b'T' };
+    table[b'a' as usize] = if is_rna { b'u' } else { b't' };
+    table[b'T' as usize] = b'A';
+    table[b'U' as usize] = b'A';
+    table[b't' as usize] = b'a';
+    table[b'u' as usize] = b'a';
+    table[b'C' as usize] = b'G';
+    table[b'c' as usize] = b'g';
+    table[b'G' as usize] = b'C';
+    table[b'g' as usize] = b'c';
+    table[b'R' as usize] = b'Y';
+    table[b'r' as usize] = b'y';
+    table[b'Y' as usize] = b'R';
+    table[b'y' as usize] = b'r';
+    table[b'K' as usize] = b'M';
+    table[b'k' as usize] = b'm';
+    table[b'M' as usize] = b'K';
+    table[b'm' as usize] = b'k';
+    table[b'B' as usize] = b'V';
+    table[b'b' as usize] = b'v';
+    table[b'V' as usize] = b'B';
+    table[b'v' as usize] = b'b';
+    table[b'D' as usize] = b'H';
+    table[b'd' as usize] = b'h';
+    table[b'H' as usize] = b'D';
+    table[b'h' as usize] = b'd';
+    table
+}
 
 struct Record {
     header: Vec<u8>,
@@ -165,45 +204,9 @@ fn reverse_complement_record(
 }
 
 fn complement(byte: u8, is_rna: bool) -> u8 {
-    match byte {
-        b'A' => {
-            if is_rna {
-                b'U'
-            } else {
-                b'T'
-            }
-        }
-        b'a' => {
-            if is_rna {
-                b'u'
-            } else {
-                b't'
-            }
-        }
-        b'T' | b'U' => b'A',
-        b't' | b'u' => b'a',
-        b'C' => b'G',
-        b'c' => b'g',
-        b'G' => b'C',
-        b'g' => b'c',
-        b'R' => b'Y',
-        b'r' => b'y',
-        b'Y' => b'R',
-        b'y' => b'r',
-        b'K' => b'M',
-        b'k' => b'm',
-        b'M' => b'K',
-        b'm' => b'k',
-        b'B' => b'V',
-        b'b' => b'v',
-        b'V' => b'B',
-        b'v' => b'b',
-        b'D' => b'H',
-        b'd' => b'h',
-        b'H' => b'D',
-        b'h' => b'd',
-        b'S' | b'W' | b'N' | b'-' => byte,
-        b's' | b'w' | b'n' => byte,
-        _ => unreachable!("sequence symbols were validated before transformation"),
+    if is_rna {
+        RNA_COMPLEMENT[byte as usize]
+    } else {
+        DNA_COMPLEMENT[byte as usize]
     }
 }

@@ -109,17 +109,19 @@ stable Rust、`hyperfine`、`awk`を用意し、リポジトリルートから�
 
 SeqKitの既定スレッド数は4で、各ツールの既定設定で測定しています。`stats`と`stats --all`の統計項目は一部異なり、`len`と`seqkit stats`は総長だけを比較します。`validate`と`composition`には同じ出力仕様の直接対応コマンドがないため比較していません。SeqKit公式の[使用方法](https://bioinf.shenwei.me/seqkit/usage/)では、対応する`stats`・`seq`・`grep`・`locate`・`faidx`の機能を説明しています。
 
+今回の実装改善では、`stats`と`filter`の塩基ごとの重複チェックを減らし、長さだけで選別する場合はGC/Nを数えないようにしました。逆相補では変換表を使い、`format`は変換なしの入力をまとめてコピーします。同じ環境での改善前後の測定では、`filter`は106.8 msから39.2 ms、`revcomp`は149.7 msから60.9 ms、`format`は54.5 msから28.2 msになりました。`stats`は111.6 msから88.0 msに改善しましたが、今回のSeqKit比較ではまだ遅い結果です。`stats`と`stats --all`の項目は完全一致せず、SeqKitは4スレッドを使います。負荷により測定値は変動します。
+
 | 処理 | `fasta-util` | SeqKit | 平均 ± 標準偏差 |
 | --- | ---: | ---: | ---: |
-| 総配列長 | `len` | `stats`（`sum_len`のみ） | 14.7 ± 0.5 ms / 36.2 ± 2.6 ms |
-| 統計 | `stats` | `stats --all` | 80.9 ± 1.2 ms / 63.7 ± 2.7 ms |
-| 長さフィルター（最小40 kb） | `filter` | `seq --min-len 40000` | 96.7 ± 4.6 ms / 36.0 ± 2.1 ms |
-| 逆相補 | `revcomp` | `seq --reverse --complement` | 146.6 ± 2.6 ms / 106.0 ± 6.3 ms |
-| ヘッダー検索 | `grep` | `grep --by-name --use-regexp` | 15.0 ± 1.4 ms / 43.4 ± 1.4 ms |
-| モチーフ位置（`ACGA`） | `locate` | `locate` | 127.4 ± 8.6 ms / 133.1 ± 7.3 ms |
-| 幅80に整形 | `format` | `seq --line-width 80` | 35.9 ± 1.2 ms / 32.8 ± 1.7 ms |
-| FAIを使う領域取得（10 kb） | `get` | `faidx` | 1.5 ± 0.3 ms / 18.6 ± 1.5 ms |
-| インデックス作成 | `index` | `faidx --update-faidx` | 14.2 ± 0.7 ms / 48.3 ± 3.0 ms |
+| 総配列長 | `len` | `stats`（`sum_len`のみ） | 15.3 ± 1.6 ms / 31.1 ± 2.5 ms |
+| 統計 | `stats` | `stats --all` | 88.0 ± 6.0 ms / 73.6 ± 5.4 ms |
+| 長さフィルター（最小40 kb） | `filter` | `seq --min-len 40000` | 39.2 ± 3.3 ms / 37.2 ± 1.1 ms |
+| 逆相補 | `revcomp` | `seq --reverse --complement` | 60.9 ± 1.1 ms / 102.7 ± 4.7 ms |
+| ヘッダー検索 | `grep` | `grep --by-name --use-regexp` | 19.7 ± 1.0 ms / 48.1 ± 0.5 ms |
+| モチーフ位置（`ACGA`） | `locate` | `locate` | 113.7 ± 3.0 ms / 143.4 ± 3.2 ms |
+| 幅80に整形 | `format` | `seq --line-width 80` | 28.2 ± 2.3 ms / 40.7 ± 4.9 ms |
+| FAIを使う領域取得（10 kb） | `get` | `faidx` | 2.3 ± 0.3 ms / 22.2 ± 1.6 ms |
+| インデックス作成 | `index` | `faidx --update-faidx` | 16.1 ± 1.5 ms / 50.6 ± 2.4 ms |
 
 `fasta-util`のFAI取得は5 ms未満で、hyperfineはシェル起動時間の校正精度に警告を出しています。測定値はこの環境における参考値です。
 

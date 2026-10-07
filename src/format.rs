@@ -120,6 +120,24 @@ impl<'a, W: Write> Formatter<'a, W> {
             ));
         }
 
+        if !self.args.uppercase && !self.args.lowercase && !self.args.remove_gaps {
+            if let Some(column) = line.iter().position(u8::is_ascii_whitespace) {
+                return Err(line_error(
+                    line_number,
+                    &format!("whitespace in sequence at column {}", column + 1),
+                ));
+            }
+            if !line.is_empty() {
+                self.record_has_sequence = true;
+                if self.args.width == 0 {
+                    self.writer.write_all(line)?;
+                } else {
+                    self.append_sequence(line)?;
+                }
+            }
+            return Ok(());
+        }
+
         for (column, mut byte) in line.iter().copied().enumerate() {
             if byte.is_ascii_whitespace() {
                 return Err(line_error(
@@ -145,6 +163,21 @@ impl<'a, W: Write> Formatter<'a, W> {
                     self.writer.write_all(b"\n")?;
                     self.sequence_line.clear();
                 }
+            }
+        }
+        Ok(())
+    }
+
+    fn append_sequence(&mut self, mut sequence: &[u8]) -> io::Result<()> {
+        while !sequence.is_empty() {
+            let available = self.args.width - self.sequence_line.len();
+            let count = available.min(sequence.len());
+            self.sequence_line.extend_from_slice(&sequence[..count]);
+            sequence = &sequence[count..];
+            if self.sequence_line.len() == self.args.width {
+                self.writer.write_all(&self.sequence_line)?;
+                self.writer.write_all(b"\n")?;
+                self.sequence_line.clear();
             }
         }
         Ok(())
