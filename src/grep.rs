@@ -1,5 +1,7 @@
 use crate::{
-    GrepArgs, ensure_distinct_input_output, output::TemporaryOutput, read_lines_from_file,
+    GrepArgs, ensure_distinct_input_output,
+    output::{InputSource, TemporaryOutput},
+    read_lines_from_file,
 };
 use fasta_util::LinesInFile;
 use std::{
@@ -11,11 +13,14 @@ pub(super) fn run(args: GrepArgs) -> Result<(), Box<dyn std::error::Error>> {
     if args.pattern.is_empty() {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "pattern cannot be empty").into());
     }
-    if let Some(output) = &args.output {
+    if let Some(output) = &args.output
+        && args.input != std::path::Path::new("-")
+    {
         ensure_distinct_input_output(&args.input, output)?;
     }
 
-    let file = File::open(&args.input)?;
+    let input = InputSource::from_optional_path(Some(&args.input))?;
+    let file = File::open(input.path())?;
     // SAFETY: The input file must not change while its memory map is alive.
     let lines = unsafe { read_lines_from_file(file)? };
     let selected = select_records(&lines, &args)?;

@@ -1,5 +1,7 @@
 use crate::{
-    FormatArgs, ensure_distinct_input_output, output::TemporaryOutput, read_lines_from_file,
+    FormatArgs, ensure_distinct_input_output,
+    output::{InputSource, TemporaryOutput},
+    read_lines_from_file,
 };
 use fasta_util::LinesInFile;
 use std::{
@@ -8,11 +10,14 @@ use std::{
 };
 
 pub(super) fn run(args: FormatArgs) -> Result<(), Box<dyn std::error::Error>> {
-    if let Some(output) = &args.output {
-        ensure_distinct_input_output(&args.input, output)?;
+    if let (Some(input), Some(output)) = (&args.input, &args.output)
+        && input != std::path::Path::new("-")
+    {
+        ensure_distinct_input_output(input, output)?;
     }
 
-    let file = File::open(&args.input)?;
+    let input = InputSource::from_optional_path(args.input.as_deref())?;
+    let file = File::open(input.path())?;
     // SAFETY: The input file must not change while its memory map is alive.
     let lines = unsafe { read_lines_from_file(file)? };
     let mut temporary_output = args

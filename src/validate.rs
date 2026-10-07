@@ -65,8 +65,13 @@ impl Reporter {
     }
 }
 
-pub(super) fn run(path: &Path, sequence_type: SequenceType) -> io::Result<bool> {
-    let file = File::open(path)?;
+pub(super) fn run(path: Option<&Path>, sequence_type: SequenceType) -> io::Result<bool> {
+    let input = crate::output::InputSource::from_optional_path(path)?;
+    let display_path = path
+        .filter(|path| *path != Path::new("-"))
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| Path::new("stdin").to_path_buf());
+    let file = File::open(input.path())?;
     let mut reader = BufReader::new(file);
     let mut reporter = Reporter::default();
     let mut records = 0usize;
@@ -87,7 +92,7 @@ pub(super) fn run(path: &Path, sequence_type: SequenceType) -> io::Result<bool> 
 
         if line.first() == Some(&b'>') {
             if let Some(record) = current_record.take() {
-                finish_record(path, record, &mut reporter);
+                finish_record(&display_path, record, &mut reporter);
             }
             records += 1;
             let header = line.to_vec();
@@ -99,7 +104,7 @@ pub(super) fn run(path: &Path, sequence_type: SequenceType) -> io::Result<bool> 
                 .to_vec();
             if id.is_empty() {
                 reporter.at(
-                    path,
+                    &display_path,
                     line_number,
                     2,
                     line,
@@ -113,7 +118,7 @@ pub(super) fn run(path: &Path, sequence_type: SequenceType) -> io::Result<bool> 
                     String::from_utf8_lossy(first_header)
                 );
                 reporter.at(
-                    path,
+                    &display_path,
                     line_number,
                     2,
                     line,
@@ -135,7 +140,7 @@ pub(super) fn run(path: &Path, sequence_type: SequenceType) -> io::Result<bool> 
         if current_record.is_none() {
             if !line.is_empty() {
                 reporter.at(
-                    path,
+                    &display_path,
                     line_number,
                     1,
                     line,
@@ -149,7 +154,7 @@ pub(super) fn run(path: &Path, sequence_type: SequenceType) -> io::Result<bool> 
         let record = current_record.as_mut().expect("record was checked above");
         if line.is_empty() {
             reporter.at(
-                path,
+                &display_path,
                 line_number,
                 1,
                 line,
@@ -165,7 +170,7 @@ pub(super) fn run(path: &Path, sequence_type: SequenceType) -> io::Result<bool> 
                 .is_some_and(|previous| previous != ending)
             {
                 reporter.at(
-                    path,
+                    &display_path,
                     line_number,
                     line.len().saturating_add(1),
                     line,
@@ -178,13 +183,13 @@ pub(super) fn run(path: &Path, sequence_type: SequenceType) -> io::Result<bool> 
         }
 
         record.symbol_count = record.symbol_count.saturating_add(line.len());
-        check_fai_line(path, record, line_number, line, &mut reporter);
+        check_fai_line(&display_path, record, line_number, line, &mut reporter);
 
         for (index, byte) in line.iter().copied().enumerate() {
             let column = index + 1;
             if byte.is_ascii_whitespace() {
                 reporter.at(
-                    path,
+                    &display_path,
                     line_number,
                     column,
                     line,
@@ -213,7 +218,7 @@ pub(super) fn run(path: &Path, sequence_type: SequenceType) -> io::Result<bool> 
                     SequenceType::Protein => "protein",
                 };
                 reporter.at(
-                    path,
+                    &display_path,
                     line_number,
                     column,
                     line,
@@ -225,7 +230,7 @@ pub(super) fn run(path: &Path, sequence_type: SequenceType) -> io::Result<bool> 
     }
 
     if let Some(record) = current_record.take() {
-        finish_record(path, record, &mut reporter);
+        finish_record(&display_path, record, &mut reporter);
     }
 
     if records == 0 {
@@ -237,7 +242,7 @@ pub(super) fn run(path: &Path, sequence_type: SequenceType) -> io::Result<bool> 
     {
         let (line, column, source) = if (t.0, t.1) <= (u.0, u.1) { u } else { t };
         reporter.at(
-            path,
+            &display_path,
             *line,
             *column,
             source,

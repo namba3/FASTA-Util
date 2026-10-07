@@ -1,11 +1,77 @@
 use std::{
     fs::{self, File, OpenOptions, Permissions},
-    io,
+    io::{self, Write},
     path::{Path, PathBuf},
     sync::atomic::{AtomicUsize, Ordering},
 };
 
 static NEXT_TEMP_OUTPUT_ID: AtomicUsize = AtomicUsize::new(0);
+static NEXT_TEMP_INPUT_ID: AtomicUsize = AtomicUsize::new(0);
+
+pub(super) struct InputSource {
+    path: PathBuf,
+    _temporary: Option<TemporaryInput>,
+}
+
+impl InputSource {
+    pub(super) fn from_optional_path(path: Option<&Path>) -> io::Result<Self> {
+        if let Some(path) = path.filter(|path| *path != Path::new("-")) {
+            return Ok(Self {
+                path: path.to_path_buf(),
+                _temporary: None,
+            });
+        }
+
+        let temporary = TemporaryInput::from_stdin()?;
+        Ok(Self {
+            path: temporary.path.clone(),
+            _temporary: Some(temporary),
+        })
+    }
+
+    pub(super) fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+struct TemporaryInput {
+    path: PathBuf,
+}
+
+impl TemporaryInput {
+    fn from_stdin() -> io::Result<Self> {
+        loop {
+            let id = NEXT_TEMP_INPUT_ID.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir()
+                .join(format!(".fasta-util-input-{}-{id}.tmp", std::process::id()));
+            let mut options = OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            match options.open(&path) {
+                Ok(mut file) => {
+                    let temporary = Self { path };
+                    let mut stdin = io::stdin().lock();
+                    io::copy(&mut stdin, &mut file)?;
+                    file.flush()?;
+                    drop(file);
+                    return Ok(temporary);
+                }
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error),
+            }
+        }
+    }
+}
+
+impl Drop for TemporaryInput {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
 
 pub(super) struct TemporaryOutput {
     destination: PathBuf,

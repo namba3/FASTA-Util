@@ -1,5 +1,6 @@
 use crate::{
-    LocateArgs, ensure_distinct_input_output, is_nucleic_acid, output::TemporaryOutput,
+    LocateArgs, ensure_distinct_input_output, is_nucleic_acid,
+    output::{InputSource, TemporaryOutput},
     read_lines_from_file,
 };
 use fasta_util::LinesInFile;
@@ -10,7 +11,9 @@ use std::{
 };
 
 pub(super) fn run(args: LocateArgs) -> Result<(), Box<dyn std::error::Error>> {
-    if let Some(output) = &args.output {
+    if let Some(output) = &args.output
+        && args.input != std::path::Path::new("-")
+    {
         ensure_distinct_input_output(&args.input, output)?;
     }
     let (pattern, reverse_pattern) = parse_pattern(args.pattern.as_bytes())?;
@@ -22,7 +25,8 @@ pub(super) fn run(args: LocateArgs) -> Result<(), Box<dyn std::error::Error>> {
         .into());
     }
 
-    let file = File::open(&args.input)?;
+    let input = InputSource::from_optional_path(Some(&args.input))?;
+    let file = File::open(input.path())?;
     // SAFETY: The input file must not change while its memory map is alive.
     let lines = unsafe { read_lines_from_file(file)? };
     let mut temporary_output = args

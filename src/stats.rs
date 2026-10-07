@@ -1,6 +1,6 @@
 use crate::{
     LinesInFile, StatsFormat, StatsSequenceType, is_amino_acid, is_nucleic_acid,
-    read_lines_from_file,
+    output::InputSource, read_lines_from_file,
 };
 use std::{fs::File, io, path::Path};
 
@@ -32,12 +32,13 @@ struct Summary {
 }
 
 pub(super) fn run(
-    path: &Path,
+    path: Option<&Path>,
     each: bool,
     format: StatsFormat,
     sequence_type: StatsSequenceType,
 ) -> io::Result<()> {
-    let file = File::open(path)?;
+    let input = InputSource::from_optional_path(path)?;
+    let file = File::open(input.path())?;
     // SAFETY: This command only reads the input; the file must not be modified
     // while the memory map is alive.
     let lines = unsafe { read_lines_from_file(file)? };

@@ -46,6 +46,14 @@ cargo run --manifest-path=generate_random_data/Cargo.toml -- 10000 --line-width 
 
 ## Sub Commands
 
+Commands that produce sequence data write to standard output unless an output file is specified. `stats`, `filter`, `revcomp`, `format`, and `validate` read standard input when their input path is omitted. For `get`, `grep`, and `locate`, pass `-` in the input position. `len` reads standard input by default and uses `-i` for file input. `index` requires a file input so it can determine where to write the `.fai` sidecar.
+
+```sh
+fasta-util filter --min-len 1000 input.fa |
+  fasta-util revcomp |
+  fasta-util stats
+```
+
 ### len
 
 Count the total length of the sequence

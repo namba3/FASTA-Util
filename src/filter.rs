@@ -1,6 +1,7 @@
 use crate::{
     FilterArgs, StatsSequenceType, ensure_distinct_input_output, is_amino_acid, is_nucleic_acid,
-    output::TemporaryOutput, read_lines_from_file,
+    output::{InputSource, TemporaryOutput},
+    read_lines_from_file,
 };
 use fasta_util::LinesInFile;
 use std::{
@@ -55,11 +56,14 @@ pub(super) fn run(args: FilterArgs) -> Result<(), Box<dyn std::error::Error>> {
         )
         .into());
     }
-    if let Some(output) = &args.output {
-        ensure_distinct_input_output(&args.input, output)?;
+    if let (Some(input), Some(output)) = (&args.input, &args.output)
+        && input != std::path::Path::new("-")
+    {
+        ensure_distinct_input_output(input, output)?;
     }
 
-    let file = File::open(&args.input)?;
+    let input = InputSource::from_optional_path(args.input.as_deref())?;
+    let file = File::open(input.path())?;
     // SAFETY: The input file must not change while its memory map is alive.
     let lines = unsafe { read_lines_from_file(file)? };
     let selected = select_records(&lines, &args)?;

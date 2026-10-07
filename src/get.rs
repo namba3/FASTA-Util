@@ -1,6 +1,7 @@
 use crate::{
-    GetArgs, SequenceType, fasta_index, output::TemporaryOutput, read_lines_from_file,
-    validated_sequence_for,
+    GetArgs, SequenceType, fasta_index,
+    output::{InputSource, TemporaryOutput},
+    read_lines_from_file, validated_sequence_for,
 };
 use std::{
     collections::HashSet,
@@ -22,6 +23,9 @@ enum Request {
 }
 
 pub(super) fn run(args: GetArgs) -> Result<(), Box<dyn std::error::Error>> {
+    let input_source = InputSource::from_optional_path(Some(&args.input))?;
+    let input_path = input_source.path();
+    let is_stdin = args.input == Path::new("-");
     let requests = load_requests(args.ids_file.as_deref(), &args.ids)?;
     if requests.is_empty() {
         return Err(io::Error::new(
@@ -47,11 +51,14 @@ pub(super) fn run(args: GetArgs) -> Result<(), Box<dyn std::error::Error>> {
             unreachable!();
         };
         let index_path = args.fai_index.or_else(|| {
-            let path = fasta_index::index_path(&args.input);
+            if is_stdin {
+                return None;
+            }
+            let path = fasta_index::index_path(input_path);
             path.exists().then_some(path)
         });
         return crate::write_global_range(crate::GlobalRangeArgs {
-            input: args.input,
+            input: input_path.to_path_buf(),
             sequence_type: args.sequence_type,
             output: args.output,
             fai_index: index_path,
@@ -68,15 +75,21 @@ pub(super) fn run(args: GetArgs) -> Result<(), Box<dyn std::error::Error>> {
         })
         .collect::<Vec<_>>();
 
-    if let Some(output) = &args.output {
-        crate::ensure_distinct_input_output(&args.input, output)?;
+    if let Some(output) = &args.output
+        && !is_stdin
+    {
+        crate::ensure_distinct_input_output(input_path, output)?;
     }
 
     let index_path = match args.fai_index {
         Some(index_path) => Some(index_path),
         None => {
-            let index_path = fasta_index::index_path(&args.input);
-            index_path.exists().then_some(index_path)
+            if is_stdin {
+                None
+            } else {
+                let index_path = fasta_index::index_path(input_path);
+                index_path.exists().then_some(index_path)
+            }
         }
     };
     if let (Some(index), Some(output)) = (&index_path, &args.output) {
@@ -105,7 +118,7 @@ pub(super) fn run(args: GetArgs) -> Result<(), Box<dyn std::error::Error>> {
             })
             .collect::<Vec<_>>();
         fasta_index::write_named_ranges(
-            &args.input,
+            input_path,
             index_path,
             &named_ranges,
             args.chars_per_line,
@@ -114,7 +127,7 @@ pub(super) fn run(args: GetArgs) -> Result<(), Box<dyn std::error::Error>> {
         )?
     } else {
         write_from_stream(
-            &args.input,
+            input_path,
             &queries,
             args.chars_per_line,
             args.sequence_type,

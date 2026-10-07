@@ -54,8 +54,8 @@ enum SubCommand {
 
 #[derive(Parser)]
 struct ValidateArgs {
-    /// FASTA file to validate
-    input: PathBuf,
+    /// FASTA file to validate (reads standard input when omitted or set to -)
+    input: Option<PathBuf>,
 
     #[arg(
         long,
@@ -74,8 +74,8 @@ struct IndexArgs {
 
 #[derive(Parser)]
 struct StatsArgs {
-    /// FASTA file to summarize
-    input: PathBuf,
+    /// FASTA file to summarize (reads standard input when omitted or set to -)
+    input: Option<PathBuf>,
 
     /// Report statistics for each record instead of the whole file
     #[arg(long)]
@@ -121,8 +121,8 @@ struct GetArgs {
 
 #[derive(Parser)]
 struct FilterArgs {
-    /// FASTA file to filter
-    input: PathBuf,
+    /// FASTA file to filter (reads standard input when omitted or set to -)
+    input: Option<PathBuf>,
 
     /// Keep records with at least this many sequence symbols
     #[arg(long)]
@@ -155,8 +155,8 @@ struct FilterArgs {
 
 #[derive(Parser)]
 struct RevcompArgs {
-    /// FASTA file containing nucleotide sequences
-    input: PathBuf,
+    /// FASTA file containing nucleotide sequences (reads standard input when omitted or set to -)
+    input: Option<PathBuf>,
 
     /// Write output to a file instead of standard output
     #[arg(short, long)]
@@ -207,8 +207,8 @@ struct LocateArgs {
 
 #[derive(Parser)]
 struct FormatArgs {
-    /// FASTA file to format
-    input: PathBuf,
+    /// FASTA file to format (reads standard input when omitted or set to -)
+    input: Option<PathBuf>,
 
     /// Sequence characters per line; 0 writes one sequence line per record
     #[arg(long, default_value_t = 60)]
@@ -291,7 +291,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     match args.sub {
         SubCommand::Len(args) => len(args)?,
         SubCommand::Validate(args) => {
-            if !validate::run(&args.input, args.sequence_type)? {
+            if !validate::run(args.input.as_deref(), args.sequence_type)? {
                 std::process::exit(1);
             }
         }
@@ -301,9 +301,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let records = fasta_index::create_index(&args.input, &index_path)?;
             println!("Indexed {records} records: {}", index_path.display());
         }
-        SubCommand::Stats(args) => {
-            stats::run(&args.input, args.each, args.format, args.sequence_type)?
-        }
+        SubCommand::Stats(args) => stats::run(
+            args.input.as_deref(),
+            args.each,
+            args.format,
+            args.sequence_type,
+        )?,
         SubCommand::Get(args) => get::run(args)?,
         SubCommand::Filter(args) => filter::run(args)?,
         SubCommand::Revcomp(args) => revcomp::run(args)?,
@@ -337,6 +340,9 @@ fn parse_fraction(value: &str) -> Result<f64, String> {
 
 fn len(args: LenArgs) -> Result<(), Box<dyn std::error::Error>> {
     let len = match args.input {
+        Some(input) if input == Path::new("-") => {
+            count_sequence_bases_for(read_lines_from_stdin(), args.sequence_type)?
+        }
         Some(input) => {
             let input = std::fs::OpenOptions::new().read(true).open(input)?;
             // SAFETY: Input files must remain unchanged for the duration of this command;

@@ -46,6 +46,14 @@ cargo run --manifest-path=generate_random_data/Cargo.toml -- 10000 --line-width 
 
 ## サブコマンド
 
+配列を入力に取るコマンドは、出力先を指定しなければ結果を標準出力に書きます。`stats`・`filter`・`revcomp`・`format`・`validate`は入力ファイルを省略すると標準入力を読みます。`get`・`grep`・`locate`では入力位置に`-`を指定してください。`len`は既定で標準入力を読み、ファイル入力には`-i`を使います。`index`は`.fai`の保存先を決めるためファイル入力が必要です。
+
+```sh
+fasta-util filter --min-len 1000 input.fa |
+  fasta-util revcomp |
+  fasta-util stats
+```
+
 ### len
 
 配列の総記号数を数えます。

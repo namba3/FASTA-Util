@@ -388,6 +388,22 @@ fn stats_reports_aggregate_lengths_n50_and_nucleotide_percentages() {
 }
 
 #[test]
+fn stats_reads_fasta_from_standard_input_when_input_is_omitted_or_dash() {
+    let contents = b">record\nACGT\n";
+    for args in [&["stats"][..], &["stats", "-"][..]] {
+        let output = run_fasta_util(args, contents);
+
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("total_len    4"));
+        assert!(output.stderr.is_empty());
+    }
+}
+
+#[test]
 fn stats_each_reports_per_record_gc_and_n_percentages() {
     let input = TemporaryFile::new(b">a\nACGTNN\n>b\nGGT\n");
     let output = run_fasta_util(&["stats", input.path(), "--each"], b"");
@@ -484,6 +500,25 @@ fn filter_combines_inclusive_length_bounds_and_preserves_record_order() {
         output.stdout,
         b">first-match description\nACGT\n>second-match\nACG\n"
     );
+}
+
+#[test]
+fn filter_reads_fasta_from_standard_input_when_input_is_omitted_or_dash() {
+    let contents = b">short\nACG\n>keep\nACGT\n";
+    for args in [
+        &["filter", "--min-len", "4"][..],
+        &["filter", "-", "--min-len", "4"][..],
+    ] {
+        let output = run_fasta_util(args, contents);
+
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stdout, b">keep\nACGT\n");
+        assert!(output.stderr.is_empty());
+    }
 }
 
 #[test]
@@ -648,6 +683,87 @@ fn revcomp_preserves_headers_and_transforms_dna_sequences() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(output.stdout, b">seq description\nTGCAACGT\n");
+}
+
+#[test]
+fn revcomp_reads_fasta_from_standard_input_when_input_is_omitted_or_dash() {
+    let contents = b">record\nACGTTGCA\n";
+    for args in [&["revcomp"][..], &["revcomp", "-"][..]] {
+        let output = run_fasta_util(args, contents);
+
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stdout, b">record\nTGCAACGT\n");
+        assert!(output.stderr.is_empty());
+    }
+}
+
+#[test]
+fn filter_revcomp_stats_compose_through_standard_streams() {
+    let input = TemporaryFile::new(b">short\nACG\n>keep\nACGTTGCA\n");
+    let mut filter = Command::new(env!("CARGO_BIN_EXE_fasta-util"))
+        .args(["filter", "--min-len", "5", input.path()])
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("failed to start filter");
+
+    let filter_stdout = filter.stdout.take().expect("filter stdout was not piped");
+    let mut revcomp = Command::new(env!("CARGO_BIN_EXE_fasta-util"))
+        .arg("revcomp")
+        .stdin(Stdio::from(filter_stdout))
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("failed to start revcomp");
+
+    let revcomp_stdout = revcomp.stdout.take().expect("revcomp stdout was not piped");
+    let stats = Command::new(env!("CARGO_BIN_EXE_fasta-util"))
+        .arg("stats")
+        .stdin(Stdio::from(revcomp_stdout))
+        .output()
+        .expect("failed to start stats");
+
+    assert!(filter.wait().unwrap().success());
+    assert!(revcomp.wait().unwrap().success());
+    assert!(
+        stats.status.success(),
+        "{}",
+        String::from_utf8_lossy(&stats.stderr)
+    );
+    assert!(String::from_utf8_lossy(&stats.stdout).contains("sequences    1"));
+    assert!(String::from_utf8_lossy(&stats.stdout).contains("total_len    8"));
+    assert!(stats.stderr.is_empty());
+}
+
+#[test]
+fn remaining_fasta_commands_accept_standard_input_with_dash_or_omitted_path() {
+    let fasta = b">record motif\nACGTTGCA\n";
+
+    let formatted = run_fasta_util(&["format"], fasta);
+    assert!(formatted.status.success());
+    assert_eq!(formatted.stdout, fasta);
+
+    let got = run_fasta_util(&["get", "-", "record"], fasta);
+    assert!(got.status.success());
+    assert_eq!(got.stdout, fasta);
+
+    let grep = run_fasta_util(&["grep", "-", "motif"], fasta);
+    assert!(grep.status.success());
+    assert_eq!(grep.stdout, fasta);
+
+    let located = run_fasta_util(&["locate", "-", "ACG"], fasta);
+    assert!(located.status.success());
+    assert_eq!(located.stdout, b"record\t1\t3\t+\nrecord\t2\t4\t-\n");
+
+    let validated = run_fasta_util(&["validate", "-"], fasta);
+    assert!(validated.status.success());
+    assert!(String::from_utf8_lossy(&validated.stdout).contains("OK: 1 records"));
+
+    let length = run_fasta_util(&["len", "-i", "-"], fasta);
+    assert!(length.status.success());
+    assert_eq!(length.stdout, b"8\n");
 }
 
 #[test]

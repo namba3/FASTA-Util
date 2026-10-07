@@ -1,5 +1,6 @@
 use crate::{
-    RevcompArgs, ensure_distinct_input_output, is_nucleic_acid, output::TemporaryOutput,
+    RevcompArgs, ensure_distinct_input_output, is_nucleic_acid,
+    output::{InputSource, TemporaryOutput},
     read_lines_from_file,
 };
 use fasta_util::LinesInFile;
@@ -19,16 +20,19 @@ struct Record {
 }
 
 pub(super) fn run(args: RevcompArgs) -> Result<(), Box<dyn std::error::Error>> {
-    if let Some(output) = &args.output {
-        ensure_distinct_input_output(&args.input, output)?;
+    if let (Some(input), Some(output)) = (&args.input, &args.output)
+        && input != std::path::Path::new("-")
+    {
+        ensure_distinct_input_output(input, output)?;
     }
 
-    let file = File::open(&args.input)?;
+    let input_source = InputSource::from_optional_path(args.input.as_deref())?;
+    let file = File::open(input_source.path())?;
     // SAFETY: The input file must not change while its memory map is alive.
     let lines = unsafe { read_lines_from_file(file)? };
     let records = scan_records(&lines)?;
 
-    let mut input = File::open(&args.input)?;
+    let mut input = File::open(input_source.path())?;
     let mut temporary_output = args
         .output
         .as_deref()
