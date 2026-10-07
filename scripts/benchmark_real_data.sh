@@ -76,10 +76,10 @@ printf '\n%s\n' 'chr1 get benchmarks (1 warmup, 5 measured runs):'
 while read -r name start length; do
     range_start=$((start + 1))
     range_end=$((start + length))
-    fasta_command="$q_binary get $q_chr1 ${range_start}-${range_end} --chars-per-line=60"
+    scan_command="$q_binary get $q_chr1 ${range_start}-${range_end} --no-fai-index --chars-per-line=60"
     indexed_command="$q_binary get $q_chr1 ${range_start}-${range_end} --fai-index $q_fai --chars-per-line=60"
 
-    "$binary" get "$chr1" "${range_start}-${range_end}" --chars-per-line=60 > "$work_dir/fasta-util.out"
+    "$binary" get "$chr1" "${range_start}-${range_end}" --no-fai-index --chars-per-line=60 > "$work_dir/fasta-util.out"
     "$binary" get "$chr1" "${range_start}-${range_end}" --fai-index "$fai" --chars-per-line=60 > "$work_dir/fasta-util-indexed.out"
     if ! cmp -s "$work_dir/fasta-util.out" "$work_dir/fasta-util-indexed.out"; then
         printf 'Output mismatch for get case %s\n' "$name" >&2
@@ -101,7 +101,7 @@ while read -r name start length; do
         seqret_command="$(q "$seqret") -sequence $q_chr1 -sbegin $((start + 1)) -send $((start + length)) -auto -stdout"
         hyperfine_args+=(-n seqret "$seqret_command")
     fi
-    hyperfine_args+=(-n fasta-util "$fasta_command" -n 'fasta-util (FAI)' "$indexed_command")
+    hyperfine_args+=(-n 'fasta-util (scan)' "$scan_command" -n 'fasta-util (FAI)' "$indexed_command")
     "$hyperfine" "${hyperfine_args[@]}"
 done <<'CASES'
 middle_100M 100000000 100000000

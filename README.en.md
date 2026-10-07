@@ -157,7 +157,7 @@ Search nucleotide sequences on both strands and print tab-separated `ID`, start,
 
 ### get
 
-Get complete records by ID, record regions using `ID:START-END`, or a global range using `START-END`. Coordinates are 1-based and inclusive. Global ranges index all record sequences concatenated in FASTA order. Multiple IDs and an ID file passed with `--ids` are supported; output follows the records' order in the FASTA file. If a `.fai` sidecar exists next to the input, regions are read directly; otherwise, the file is scanned from the beginning. Pass `--fai-index` to use a specific index. Set output wrapping with `--chars-per-line`.
+Get complete records by ID, record regions using `ID:START-END`, or a global range using `START-END`. Coordinates are 1-based and inclusive. Global ranges index all record sequences concatenated in FASTA order. Multiple IDs and an ID file passed with `--ids` are supported; output follows the records' order in the FASTA file. If a `.fai` sidecar exists next to the input, it is used automatically; otherwise, the file is scanned from the beginning. Pass `--fai-index` to select an index, or `--no-fai-index` to disable automatic index use. Set output wrapping with `--chars-per-line`.
 
 ```sh
 ./target/release/fasta-util get genome.fa chr1
@@ -166,6 +166,7 @@ Get complete records by ID, record regions using `ID:START-END`, or a global ran
 ./target/release/fasta-util get genome.fa chr1:1000-2000
 ./target/release/fasta-util get genome.fa 1000-2000
 ./target/release/fasta-util get genome.fa 1000-2000 --fai-index genome.fa.fai
+./target/release/fasta-util get genome.fa 1000-2000 --no-fai-index
 ```
 
 ### validate

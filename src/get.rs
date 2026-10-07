@@ -51,7 +51,7 @@ pub(super) fn run(args: GetArgs) -> Result<(), Box<dyn std::error::Error>> {
             unreachable!();
         };
         let index_path = args.fai_index.or_else(|| {
-            if is_stdin {
+            if is_stdin || args.no_fai_index {
                 return None;
             }
             let path = fasta_index::index_path(input_path);
@@ -84,7 +84,7 @@ pub(super) fn run(args: GetArgs) -> Result<(), Box<dyn std::error::Error>> {
     let index_path = match args.fai_index {
         Some(index_path) => Some(index_path),
         None => {
-            if is_stdin {
+            if is_stdin || args.no_fai_index {
                 None
             } else {
                 let index_path = fasta_index::index_path(input_path);

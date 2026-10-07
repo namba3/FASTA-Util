@@ -63,25 +63,25 @@ Times below are mean ± standard deviation from hyperfine. The `get` index resul
 
 ## RefSeq GRCh38.p14 dataset
 
-The remeasurement used `dataset/ncbi_dataset/data/GCF_000001405.40/GCF_000001405.40_GRCh38.p14_genomic.fna` (3,339,739,109 bytes, 705 records, 3,298,430,636 sequence symbols). The chromosome 1 record `NC_000001.11` has 248,956,422 bases. The benchmark preserved lowercase soft masking. `get` output with and without `.fai` was compared byte-for-byte before timing. Each case had one warmup and five measured runs. `seqkit stats` and `fasta-util len` reported the same total sequence length.
+The remeasurement used `dataset/ncbi_dataset/data/GCF_000001405.40/GCF_000001405.40_GRCh38.p14_genomic.fna` (3,339,739,109 bytes, 705 records, 3,298,430,636 sequence symbols). The chromosome 1 record `NC_000001.11` has 248,956,422 bases. The benchmark preserved lowercase soft masking. The scan path passed `--no-fai-index`, and the indexed path passed `--fai-index` explicitly; their outputs were compared byte-for-byte before timing. Each case had one warmup and five measured runs. `seqkit stats` and `fasta-util len` reported the same total sequence length.
 
 | Command | Result | Mean ± σ |
 | --- | ---: | ---: |
-| `seqkit stats` (whole assembly) | 705 records, 3,298,430,636 bases | 1.622 ± 0.059 s |
-| `fasta-util len` (whole assembly) | 3,298,430,636 bases | 1.556 ± 0.028 s |
+| `seqkit stats` (whole assembly) | 705 records, 3,298,430,636 bases | 1.700 ± 0.083 s |
+| `fasta-util len` (whole assembly) | 3,298,430,636 bases | 2.133 ± 0.134 s |
 
 `get` results below are for chromosome 1. The offset is zero-based within the input for describing the selected region; the command uses 1-based inclusive coordinates. Output was wrapped at 60 bases per line.
 
 | Offset | Length | `seqret` | Scan | FAI |
 | ---: | ---: | ---: | ---: | ---: |
-| 100,000,000 | 100,000,000 | 856.8 ± 67.3 ms | 50.6 ± 1.8 ms | 53.4 ± 2.3 ms |
-| 100,000,000 | 100,000 | 664.3 ± 49.4 ms | 2.4 ± 0.3 ms | 2.5 ± 0.4 ms |
-| 100,000,000 | 100 | 696.2 ± 92.7 ms | 1.5 ± 0.2 ms | 1.5 ± 0.2 ms |
-| 0 | 100,000,000 | 844.0 ± 88.6 ms | 52.3 ± 2.3 ms | 54.0 ± 4.5 ms |
-| 0 | 100,000 | 632.1 ± 31.4 ms | 1.4 ± 0.2 ms | 1.5 ± 0.2 ms |
-| 0 | 100 | 518.5 ± 31.2 ms | 1.1 ± 0.1 ms | 1.1 ± 0.2 ms |
+| 100,000,000 | 100,000,000 | 846.0 ± 56.2 ms | 175.8 ± 7.8 ms | 56.7 ± 2.5 ms |
+| 100,000,000 | 100,000 | 693.8 ± 76.1 ms | 98.0 ± 1.8 ms | 1.7 ± 0.3 ms |
+| 100,000,000 | 100 | 646.6 ± 37.1 ms | 81.6 ± 2.9 ms | 1.3 ± 0.2 ms |
+| 0 | 100,000,000 | 898.7 ± 64.0 ms | 109.1 ± 10.5 ms | 54.0 ± 2.7 ms |
+| 0 | 100,000 | 701.6 ± 44.3 ms | 1.6 ± 0.3 ms | 1.4 ± 0.1 ms |
+| 0 | 100 | 735.2 ± 44.6 ms | 1.5 ± 0.1 ms | 1.4 ± 0.1 ms |
 
-The `seqret` output matched `fasta-util get` byte-for-byte in all six cases. Small-region timings are dominated by process startup and warm file-cache behavior. The large extractions are not directly comparable in bytes read: `fasta-util` seeks into the FASTA, while `seqret` reads the sequence through its sequence I/O path.
+The `seqret` output matched `fasta-util get` byte-for-byte in all six cases. For 100 bp and 100 kb at the start of the file, process startup dominates both `get` paths, so the measured difference is small. For small regions in the middle, scanning reads sequence data up to the requested start, so seeking through the FAI makes a large difference. A 100 Mb extraction also spends time copying and writing the selected sequence. The previous scan measurements were invalid because that command automatically detected the adjacent `.fai`; this table was rerun with `--no-fai-index`.
 
 Reproduce with the checked-in dataset, or pass another FASTA path as the first argument:
 

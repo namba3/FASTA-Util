@@ -157,7 +157,7 @@ FASTAの改行をLFに統一し、配列行を指定幅で折り返します。�
 
 ### get
 
-指定したIDのレコード全体、`ID:開始-終了`形式のレコード内領域、または`開始-終了`形式の全体範囲を取得します。座標は1始まりで両端を含みます。全体範囲は全レコードの配列をファイル順に連結した位置です。複数IDや`--ids`ファイルに対応し、出力はFASTA内の出現順です。入力の隣に`.fai`があれば領域を直接読み込み、なければ先頭から検索します。インデックスを明示する場合は`--fai-index`を指定します。配列の折り返し幅は`--chars-per-line`で指定できます。
+指定したIDのレコード全体、`ID:開始-終了`形式のレコード内領域、または`開始-終了`形式の全体範囲を取得します。座標は1始まりで両端を含みます。全体範囲は全レコードの配列をファイル順に連結した位置です。複数IDや`--ids`ファイルに対応し、出力はFASTA内の出現順です。入力の隣に`.fai`があれば自動で使い、なければ先頭から検索します。`--fai-index`でインデックスを明示でき、`--no-fai-index`で自動利用を無効にできます。配列の折り返し幅は`--chars-per-line`で指定できます。
 
 ```sh
 ./target/release/fasta-util get genome.fa chr1
@@ -166,6 +166,7 @@ FASTAの改行をLFに統一し、配列行を指定幅で折り返します。�
 ./target/release/fasta-util get genome.fa chr1:1000-2000
 ./target/release/fasta-util get genome.fa 1000-2000
 ./target/release/fasta-util get genome.fa 1000-2000 --fai-index genome.fa.fai
+./target/release/fasta-util get genome.fa 1000-2000 --no-fai-index
 ```
 
 ### validate

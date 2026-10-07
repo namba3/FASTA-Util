@@ -1515,6 +1515,55 @@ fn get_uses_a_sidecar_fai_for_region_extraction() {
 }
 
 #[test]
+fn get_can_bypass_an_invalid_adjacent_fai_for_record_and_global_ranges() {
+    let input = TemporaryFile::new(b">chr1 description\nAACCGG\nTTAA\n>chr2\nGGCC\n");
+    let index_path = PathBuf::from(format!("{}.fai", input.path()));
+    let index = run_fasta_util(&["index", input.path()], b"");
+    assert!(index.status.success());
+    fs::write(&index_path, b"invalid index\n").unwrap();
+
+    let automatic = run_fasta_util(&["get", input.path(), "chr1:3-8"], b"");
+    assert!(!automatic.status.success());
+
+    let record_region = run_fasta_util(&["get", input.path(), "chr1:3-8", "--no-fai-index"], b"");
+    assert!(
+        record_region.status.success(),
+        "{}",
+        String::from_utf8_lossy(&record_region.stderr)
+    );
+    assert_eq!(record_region.stdout, b">chr1:3-8\nCCGGTT\n");
+
+    let global_range = run_fasta_util(&["get", input.path(), "8-13", "--no-fai-index"], b"");
+    assert!(
+        global_range.status.success(),
+        "{}",
+        String::from_utf8_lossy(&global_range.stderr)
+    );
+    assert_eq!(global_range.stdout, b">chr1 description\nTAA\n>chr2\nGGC\n");
+
+    fs::remove_file(index_path).unwrap();
+}
+
+#[test]
+fn get_rejects_conflicting_fai_options() {
+    let input = TemporaryFile::new(b">chr1\nACGT\n");
+    let output = run_fasta_util(
+        &[
+            "get",
+            input.path(),
+            "chr1",
+            "--fai-index",
+            "custom.fai",
+            "--no-fai-index",
+        ],
+        b"",
+    );
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("cannot be used with"));
+}
+
+#[test]
 fn get_uses_a_sidecar_fai_for_global_range_extraction() {
     let input = TemporaryFile::new(b">first description\nAACG\nTTGC\n>second\nCAAA\n");
     let index_path = PathBuf::from(format!("{}.fai", input.path()));

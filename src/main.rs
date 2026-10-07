@@ -117,8 +117,12 @@ struct GetArgs {
     ids_file: Option<PathBuf>,
 
     /// Use this FASTA .fai index; defaults to <input>.fai when present
-    #[arg(long)]
+    #[arg(long, conflicts_with = "no_fai_index")]
     fai_index: Option<PathBuf>,
+
+    /// Do not use an adjacent .fai index, even when one exists
+    #[arg(long, conflicts_with = "fai_index")]
+    no_fai_index: bool,
 
     /// Write output to a file instead of standard output
     #[arg(short, long)]
