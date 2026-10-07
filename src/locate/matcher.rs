@@ -146,7 +146,7 @@ enum MultiWordMode {
         one_mismatch_state: Vec<u64>,
     },
     Multiple {
-        states: Vec<Vec<u64>>,
+        states_by_word: Vec<u64>,
     },
 }
 
@@ -170,7 +170,7 @@ impl MultiWordShiftAndState {
             }
         } else {
             MultiWordMode::Multiple {
-                states: (0..=max_mismatch).map(|_| vec![0; word_count]).collect(),
+                states_by_word: vec![0; word_count * (max_mismatch + 1)],
             }
         };
         Self {
@@ -191,11 +191,7 @@ impl MultiWordShiftAndState {
                 exact_state.fill(0);
                 one_mismatch_state.fill(0);
             }
-            MultiWordMode::Multiple { states, .. } => {
-                for state in states {
-                    state.fill(0);
-                }
-            }
+            MultiWordMode::Multiple { states_by_word } => states_by_word.fill(0),
         }
     }
 
@@ -232,13 +228,17 @@ impl MultiWordShiftAndState {
                 };
                 state[final_word] & final_position != 0
             }
-            MultiWordMode::Multiple { states } => {
+            MultiWordMode::Multiple { states_by_word } => {
                 let mut carries = [1u64; MAX_BIT_PARALLEL_MISMATCHES + 1];
                 let mut next_carries = [0u64; MAX_BIT_PARALLEL_MISMATCHES + 1];
+                let state_count = max_mismatch + 1;
                 for (word, matching_positions) in matching_positions.iter().copied().enumerate() {
                     let mut previous_states = [0u64; MAX_BIT_PARALLEL_MISMATCHES + 1];
-                    for (error_count, state) in states.iter().enumerate() {
-                        previous_states[error_count] = state[word];
+                    let state_offset = word * state_count;
+                    for (error_count, previous_state) in
+                        previous_states.iter_mut().enumerate().take(state_count)
+                    {
+                        *previous_state = states_by_word[state_offset + error_count];
                     }
                     for error_count in 0..=max_mismatch {
                         let previous_state = previous_states[error_count];
@@ -250,12 +250,12 @@ impl MultiWordShiftAndState {
                                 | ((previous_states[error_count - 1] << 1)
                                     | carries[error_count - 1])
                         };
-                        states[error_count][word] = next_state;
+                        states_by_word[state_offset + error_count] = next_state;
                         next_carries[error_count] = previous_state >> (u64::BITS - 1);
                     }
                     carries = next_carries;
                 }
-                states[max_mismatch][final_word] & final_position != 0
+                states_by_word[final_word * state_count + max_mismatch] & final_position != 0
             }
         }
     }
@@ -456,5 +456,24 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn multiword_multiple_mismatch_state_resets_between_records() {
+        let pattern = [0b0001; 65];
+        let reverse_pattern = [0b1000; 65];
+        let mut matcher = BitParallelMatcher::new(&pattern, &reverse_pattern, 3);
+        let mut result = (false, false);
+
+        for _ in 0..pattern.len() {
+            result = matcher.advance(0b0001);
+        }
+        assert_eq!(result, (true, false));
+
+        matcher.reset();
+        for _ in 0..pattern.len() {
+            result = matcher.advance(0b0010);
+        }
+        assert_eq!(result, (false, false));
     }
 }
