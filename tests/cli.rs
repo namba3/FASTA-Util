@@ -1378,6 +1378,34 @@ fn locate_uses_bounded_mismatch_search_for_long_motifs() {
 }
 
 #[test]
+fn locate_matches_every_window_when_mismatch_limit_equals_motif_length() {
+    let motif = "A".repeat(65);
+    let input = TemporaryFile::new(
+        format!(
+            ">seq description\n{}\n{}\n>second\n{}\n",
+            "C".repeat(32),
+            "C".repeat(33),
+            "G".repeat(65)
+        )
+        .as_bytes(),
+    );
+    let output = run_fasta_util(
+        &["locate", input.path(), &motif, "--max-mismatch", "65"],
+        b"",
+    );
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        output.stdout,
+        b"seq\t1\t65\t+\nseq\t1\t65\t-\nsecond\t1\t65\t+\nsecond\t1\t65\t-\n"
+    );
+}
+
+#[test]
 fn locate_allows_a_bounded_number_of_mismatches() {
     let input = TemporaryFile::new(b">seq\nAATCAA\n");
     let exact = run_fasta_util(&["locate", input.path(), "AATAAA"], b"");

@@ -94,6 +94,7 @@ struct LocateScanner<'a, W: Write> {
     position: u64,
     window: VecDeque<u8>,
     bit_parallel: Option<BitParallelMatcher>,
+    any_window_matches: bool,
 }
 
 impl<'a, W: Write> LocateScanner<'a, W> {
@@ -103,7 +104,8 @@ impl<'a, W: Write> LocateScanner<'a, W> {
         max_mismatch: usize,
         writer: &'a mut W,
     ) -> Self {
-        let bit_parallel = (max_mismatch <= MAX_BIT_PARALLEL_MISMATCHES)
+        let any_window_matches = max_mismatch >= pattern.len();
+        let bit_parallel = (!any_window_matches && max_mismatch <= MAX_BIT_PARALLEL_MISMATCHES)
             .then(|| BitParallelMatcher::new(pattern, reverse_pattern, max_mismatch));
         Self {
             pattern,
@@ -113,12 +115,13 @@ impl<'a, W: Write> LocateScanner<'a, W> {
             record_id: None,
             saw_record: false,
             position: 0,
-            window: VecDeque::with_capacity(if bit_parallel.is_some() {
+            window: VecDeque::with_capacity(if bit_parallel.is_some() || any_window_matches {
                 0
             } else {
                 pattern.len()
             }),
             bit_parallel,
+            any_window_matches,
         }
     }
 
@@ -169,7 +172,12 @@ impl<'a, W: Write> LocateScanner<'a, W> {
                 .position
                 .checked_add(1)
                 .ok_or_else(|| line_error(line_number, "sequence position overflow"))?;
-            let (matches_forward, matches_reverse) = if let Some(matcher) = &mut self.bit_parallel {
+            let (matches_forward, matches_reverse) = if self.any_window_matches {
+                if self.position < self.pattern.len() as u64 {
+                    continue;
+                }
+                (true, true)
+            } else if let Some(matcher) = &mut self.bit_parallel {
                 let matches = matcher.advance(mask);
                 if self.position < self.pattern.len() as u64 {
                     continue;
