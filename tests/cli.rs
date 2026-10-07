@@ -246,6 +246,18 @@ fn validate_reports_invalid_symbol_at_its_line_and_column() {
 }
 
 #[test]
+fn validate_reports_multiple_errors_in_one_pass_without_stdout() {
+    let output = run_validate(b">duplicate\nACZ\n>duplicate\n", &[]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(stderr.contains("invalid nucleotide 'Z'"));
+    assert!(stderr.contains("duplicate record identifier `duplicate`"));
+    assert!(stderr.contains("record has an empty sequence"));
+}
+
+#[test]
 fn validate_reports_whitespace_inside_sequence_lines() {
     let output = run_validate(b">seq\nAC GT\n", &[]);
     let stderr = String::from_utf8_lossy(&output.stderr);

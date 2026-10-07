@@ -104,7 +104,7 @@ fn run_reader(
 
         if line.first() == Some(&b'>') {
             if let Some(record) = current_record.take() {
-                finish_record(&display_path, record, &mut reporter);
+                finish_record(display_path, record, &mut reporter);
             }
             records += 1;
             let header = line.to_vec();
@@ -116,7 +116,7 @@ fn run_reader(
                 .to_vec();
             if id.is_empty() {
                 reporter.at(
-                    &display_path,
+                    display_path,
                     line_number,
                     2,
                     line,
@@ -130,7 +130,7 @@ fn run_reader(
                     String::from_utf8_lossy(first_header)
                 );
                 reporter.at(
-                    &display_path,
+                    display_path,
                     line_number,
                     2,
                     line,
@@ -152,7 +152,7 @@ fn run_reader(
         if current_record.is_none() {
             if !line.is_empty() {
                 reporter.at(
-                    &display_path,
+                    display_path,
                     line_number,
                     1,
                     line,
@@ -166,7 +166,7 @@ fn run_reader(
         let record = current_record.as_mut().expect("record was checked above");
         if line.is_empty() {
             reporter.at(
-                &display_path,
+                display_path,
                 line_number,
                 1,
                 line,
@@ -182,7 +182,7 @@ fn run_reader(
                 .is_some_and(|previous| previous != ending)
             {
                 reporter.at(
-                    &display_path,
+                    display_path,
                     line_number,
                     line.len().saturating_add(1),
                     line,
@@ -195,13 +195,13 @@ fn run_reader(
         }
 
         record.symbol_count = record.symbol_count.saturating_add(line.len());
-        check_fai_line(&display_path, record, line_number, line, &mut reporter);
+        check_fai_line(display_path, record, line_number, line, &mut reporter);
 
         for (index, byte) in line.iter().copied().enumerate() {
             let column = index + 1;
             if byte.is_ascii_whitespace() {
                 reporter.at(
-                    &display_path,
+                    display_path,
                     line_number,
                     column,
                     line,
@@ -230,7 +230,7 @@ fn run_reader(
                     SequenceType::Protein => "protein",
                 };
                 reporter.at(
-                    &display_path,
+                    display_path,
                     line_number,
                     column,
                     line,
@@ -242,7 +242,7 @@ fn run_reader(
     }
 
     if let Some(record) = current_record.take() {
-        finish_record(&display_path, record, &mut reporter);
+        finish_record(display_path, record, &mut reporter);
     }
 
     if records == 0 {
@@ -254,7 +254,7 @@ fn run_reader(
     {
         let (line, column, source) = if (t.0, t.1) <= (u.0, u.1) { u } else { t };
         reporter.at(
-            &display_path,
+            display_path,
             *line,
             *column,
             source,
