@@ -22,10 +22,14 @@ struct Counts {
 #[derive(Default)]
 struct Summary {
     records: Vec<RecordStats>,
+    record_count: u64,
     total_length: u64,
     total_gc: u64,
     total_n: u64,
     lengths: Vec<u64>,
+    min_length: u64,
+    max_length: u64,
+    n50: u64,
     saw_t: bool,
     saw_u: bool,
     saw_protein_only: bool,
@@ -42,7 +46,7 @@ pub(super) fn run(
     // SAFETY: This command only reads the input; the file must not be modified
     // while the memory map is alive.
     let lines = unsafe { read_lines_from_file(file)? };
-    let summary = collect_stats(&lines, sequence_type)?;
+    let summary = collect_stats(&lines, sequence_type, each)?;
     let kind = sequence_kind(&summary, sequence_type);
 
     match (format, each) {
@@ -54,16 +58,20 @@ pub(super) fn run(
     Ok(())
 }
 
-fn collect_stats(lines: &LinesInFile, sequence_type: StatsSequenceType) -> io::Result<Summary> {
+fn collect_stats(
+    lines: &LinesInFile,
+    sequence_type: StatsSequenceType,
+    each: bool,
+) -> io::Result<Summary> {
     let mut summary = Summary::default();
-    let mut current: Option<(RecordStats, Counts)> = None;
+    let mut current: Option<(Option<String>, Counts)> = None;
     let mut saw_record = false;
 
     lines.try_for_each_line(|line_number, raw_line| {
         let line = strip_line_ending(raw_line);
         if line.first() == Some(&b'>') {
             if let Some((record, counts)) = current.take() {
-                add_record(&mut summary, record, counts)?;
+                add_record(&mut summary, record, counts, each)?;
             }
             let id = line[1..]
                 .trim_ascii_start()
@@ -73,13 +81,8 @@ fn collect_stats(lines: &LinesInFile, sequence_type: StatsSequenceType) -> io::R
             if id.is_empty() {
                 return Err(stats_error(line_number, "record identifier is empty"));
             }
-            current = Some((
-                RecordStats {
-                    id: String::from_utf8_lossy(id).into_owned(),
-                    ..RecordStats::default()
-                },
-                Counts::default(),
-            ));
+            let id = each.then(|| String::from_utf8_lossy(id).into_owned());
+            current = Some((id, Counts::default()));
             saw_record = true;
             return Ok(());
         }
@@ -139,7 +142,7 @@ fn collect_stats(lines: &LinesInFile, sequence_type: StatsSequenceType) -> io::R
     })?;
 
     if let Some((record, counts)) = current {
-        add_record(&mut summary, record, counts)?;
+        add_record(&mut summary, record, counts, each)?;
     }
     if !saw_record {
         return Err(io::Error::new(
@@ -147,29 +150,63 @@ fn collect_stats(lines: &LinesInFile, sequence_type: StatsSequenceType) -> io::R
             "no FASTA records found",
         ));
     }
+    if !each {
+        summary
+            .lengths
+            .sort_unstable_by(|left, right| right.cmp(left));
+        let threshold = summary.total_length / 2 + summary.total_length % 2;
+        let mut cumulative = 0u64;
+        for &length in &summary.lengths {
+            cumulative += length;
+            if cumulative >= threshold {
+                summary.n50 = length;
+                break;
+            }
+        }
+    }
     Ok(summary)
 }
 
-fn add_record(summary: &mut Summary, mut record: RecordStats, counts: Counts) -> io::Result<()> {
-    record.length = counts.length;
-    record.gc = counts.gc;
-    record.n = counts.n;
+fn add_record(
+    summary: &mut Summary,
+    id: Option<String>,
+    counts: Counts,
+    each: bool,
+) -> io::Result<()> {
+    summary.record_count = summary
+        .record_count
+        .checked_add(1)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "record count overflow"))?;
     summary.total_length = summary
         .total_length
-        .checked_add(record.length)
+        .checked_add(counts.length)
         .ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidData, "total sequence length overflow")
         })?;
     summary.total_gc = summary
         .total_gc
-        .checked_add(record.gc)
+        .checked_add(counts.gc)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "GC count overflow"))?;
     summary.total_n = summary
         .total_n
-        .checked_add(record.n)
+        .checked_add(counts.n)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "N count overflow"))?;
-    summary.lengths.push(record.length);
-    summary.records.push(record);
+    summary.min_length = if summary.record_count == 1 {
+        counts.length
+    } else {
+        summary.min_length.min(counts.length)
+    };
+    summary.max_length = summary.max_length.max(counts.length);
+    if each {
+        summary.records.push(RecordStats {
+            id: id.unwrap_or_default(),
+            length: counts.length,
+            gc: counts.gc,
+            n: counts.n,
+        });
+    } else {
+        summary.lengths.push(counts.length);
+    }
     Ok(())
 }
 
@@ -211,20 +248,6 @@ fn nucleotide_kind(summary: &Summary) -> &'static str {
     }
 }
 
-fn n50(summary: &Summary) -> u64 {
-    let mut lengths = summary.lengths.clone();
-    lengths.sort_unstable_by(|left, right| right.cmp(left));
-    let threshold = summary.total_length / 2 + summary.total_length % 2;
-    let mut cumulative = 0u64;
-    for length in lengths {
-        cumulative += length;
-        if cumulative >= threshold {
-            return length;
-        }
-    }
-    0
-}
-
 fn percentage(count: u64, total: u64) -> f64 {
     if total == 0 {
         0.0
@@ -234,7 +257,7 @@ fn percentage(count: u64, total: u64) -> f64 {
 }
 
 fn rounded_mean(summary: &Summary) -> u64 {
-    let count = summary.records.len() as u64;
+    let count = summary.record_count;
     let quotient = summary.total_length / count;
     let remainder = summary.total_length % count;
     if remainder >= count / 2 + count % 2 {
@@ -259,18 +282,12 @@ fn write_summary_text(summary: &Summary, kind: &str) {
     } else {
         format!("{:.2}%", percentage(summary.total_n, summary.total_length))
     };
-    println!("sequences    {}", summary.records.len());
+    println!("sequences    {}", summary.record_count);
     println!("total_len    {}", with_grouping(summary.total_length));
-    println!(
-        "min_len      {}",
-        with_grouping(*summary.lengths.iter().min().unwrap_or(&0))
-    );
-    println!(
-        "max_len      {}",
-        with_grouping(*summary.lengths.iter().max().unwrap_or(&0))
-    );
+    println!("min_len      {}", with_grouping(summary.min_length));
+    println!("max_len      {}", with_grouping(summary.max_length));
     println!("mean_len     {}", with_grouping(rounded_mean(summary)));
-    println!("N50          {}", with_grouping(n50(summary)));
+    println!("N50          {}", with_grouping(summary.n50));
     println!("GC           {gc}");
     println!("N            {n}");
     println!("type         {kind}");
@@ -314,14 +331,14 @@ fn write_summary_json(summary: &Summary, kind: &str) {
     } else {
         format!("{:.6}", percentage(summary.total_n, summary.total_length))
     };
-    let mean = summary.total_length as f64 / summary.records.len() as f64;
+    let mean = summary.total_length as f64 / summary.record_count as f64;
     println!(
         "{{\n  \"sequences\": {},\n  \"total_len\": {},\n  \"min_len\": {},\n  \"max_len\": {},\n  \"mean_len\": {mean},\n  \"n50\": {},\n  \"gc_percent\": {gc},\n  \"n_percent\": {n},\n  \"type\": {}\n}}",
-        summary.records.len(),
+        summary.record_count,
         summary.total_length,
-        summary.lengths.iter().min().unwrap_or(&0),
-        summary.lengths.iter().max().unwrap_or(&0),
-        n50(summary),
+        summary.min_length,
+        summary.max_length,
+        summary.n50,
         json_string(kind),
     );
 }
