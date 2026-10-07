@@ -1,8 +1,12 @@
 use crate::{
     LinesInFile, StatsFormat, StatsSequenceType, is_amino_acid, is_nucleic_acid,
-    output::InputSource, read_lines_from_file,
+    read_lines_from_file,
 };
-use std::{fs::File, io, path::Path};
+use std::{
+    fs::File,
+    io::{self, BufRead},
+    path::Path,
+};
 
 #[derive(Default)]
 struct RecordStats {
@@ -35,18 +39,37 @@ struct Summary {
     saw_protein_only: bool,
 }
 
+struct StatsCollector {
+    summary: Summary,
+    current: Option<(Option<String>, Counts)>,
+    saw_record: bool,
+    sequence_type: StatsSequenceType,
+    each: bool,
+}
+
 pub(super) fn run(
     path: Option<&Path>,
     each: bool,
     format: StatsFormat,
     sequence_type: StatsSequenceType,
 ) -> io::Result<()> {
-    let input = InputSource::from_optional_path(path)?;
-    let file = File::open(input.path())?;
-    // SAFETY: This command only reads the input; the file must not be modified
-    // while the memory map is alive.
-    let lines = unsafe { read_lines_from_file(file)? };
-    let summary = collect_stats(&lines, sequence_type, each)?;
+    let summary = match path {
+        None => {
+            let stdin = io::stdin();
+            collect_stats_from_reader(stdin.lock(), sequence_type, each)?
+        }
+        Some(path) if path == Path::new("-") => {
+            let stdin = io::stdin();
+            collect_stats_from_reader(stdin.lock(), sequence_type, each)?
+        }
+        Some(path) => {
+            let file = File::open(path)?;
+            // SAFETY: This command only reads the input; the file must not be modified
+            // while the memory map is alive.
+            let lines = unsafe { read_lines_from_file(file)? };
+            collect_stats(&lines, sequence_type, each)?
+        }
+    };
     let kind = sequence_kind(&summary, sequence_type);
 
     match (format, each) {
@@ -63,15 +86,48 @@ fn collect_stats(
     sequence_type: StatsSequenceType,
     each: bool,
 ) -> io::Result<Summary> {
-    let mut summary = Summary::default();
-    let mut current: Option<(Option<String>, Counts)> = None;
-    let mut saw_record = false;
+    let mut collector = StatsCollector::new(sequence_type, each);
+    lines.try_for_each_line(|line_number, line| collector.process_line(line_number, line))?;
+    collector.finish()
+}
 
-    lines.try_for_each_line(|line_number, raw_line| {
+fn collect_stats_from_reader(
+    mut reader: impl BufRead,
+    sequence_type: StatsSequenceType,
+    each: bool,
+) -> io::Result<Summary> {
+    let mut collector = StatsCollector::new(sequence_type, each);
+    let mut line = Vec::new();
+    let mut line_number = 0usize;
+    loop {
+        line.clear();
+        if reader.read_until(b'\n', &mut line)? == 0 {
+            break;
+        }
+        line_number = line_number
+            .checked_add(1)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "line number overflow"))?;
+        collector.process_line(line_number, &line)?;
+    }
+    collector.finish()
+}
+
+impl StatsCollector {
+    fn new(sequence_type: StatsSequenceType, each: bool) -> Self {
+        Self {
+            summary: Summary::default(),
+            current: None,
+            saw_record: false,
+            sequence_type,
+            each,
+        }
+    }
+
+    fn process_line(&mut self, line_number: usize, raw_line: &[u8]) -> io::Result<()> {
         let line = strip_line_ending(raw_line);
         if line.first() == Some(&b'>') {
-            if let Some((record, counts)) = current.take() {
-                add_record(&mut summary, record, counts, each)?;
+            if let Some((record, counts)) = self.current.take() {
+                add_record(&mut self.summary, record, counts, self.each)?;
             }
             let id = line[1..]
                 .trim_ascii_start()
@@ -81,13 +137,13 @@ fn collect_stats(
             if id.is_empty() {
                 return Err(stats_error(line_number, "record identifier is empty"));
             }
-            let id = each.then(|| String::from_utf8_lossy(id).into_owned());
-            current = Some((id, Counts::default()));
-            saw_record = true;
+            let id = self.each.then(|| String::from_utf8_lossy(id).into_owned());
+            self.current = Some((id, Counts::default()));
+            self.saw_record = true;
             return Ok(());
         }
 
-        let Some((_, counts)) = current.as_mut() else {
+        let Some((_, counts)) = self.current.as_mut() else {
             if line.is_empty() {
                 return Ok(());
             }
@@ -106,13 +162,13 @@ fn collect_stats(
                 ));
             }
 
-            let valid = match sequence_type {
+            let valid = match self.sequence_type {
                 StatsSequenceType::Nucleotide => is_nucleic_acid(byte),
                 StatsSequenceType::Protein => is_amino_acid(byte),
                 StatsSequenceType::Auto => is_amino_acid(byte),
             };
             if !valid {
-                let kind = match sequence_type {
+                let kind = match self.sequence_type {
                     StatsSequenceType::Protein => "protein",
                     StatsSequenceType::Nucleotide | StatsSequenceType::Auto => "nucleotide",
                 };
@@ -129,42 +185,44 @@ fn collect_stats(
                 counts.n = checked_add(counts.n, 1, line_number, "N count overflow")?;
             }
             if byte == b'T' || byte == b't' {
-                summary.saw_t = true;
+                self.summary.saw_t = true;
             } else if byte == b'U' || byte == b'u' {
-                summary.saw_u = true;
+                self.summary.saw_u = true;
             }
-            if sequence_type == StatsSequenceType::Auto && !is_nucleic_acid(byte) {
-                summary.saw_protein_only = true;
+            if self.sequence_type == StatsSequenceType::Auto && !is_nucleic_acid(byte) {
+                self.summary.saw_protein_only = true;
             }
             counts.length = checked_add(counts.length, 1, line_number, "sequence length overflow")?;
         }
         Ok(())
-    })?;
+    }
 
-    if let Some((record, counts)) = current {
-        add_record(&mut summary, record, counts, each)?;
-    }
-    if !saw_record {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "no FASTA records found",
-        ));
-    }
-    if !each {
-        summary
-            .lengths
-            .sort_unstable_by(|left, right| right.cmp(left));
-        let threshold = summary.total_length / 2 + summary.total_length % 2;
-        let mut cumulative = 0u64;
-        for &length in &summary.lengths {
-            cumulative += length;
-            if cumulative >= threshold {
-                summary.n50 = length;
-                break;
+    fn finish(mut self) -> io::Result<Summary> {
+        if let Some((record, counts)) = self.current {
+            add_record(&mut self.summary, record, counts, self.each)?;
+        }
+        if !self.saw_record {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "no FASTA records found",
+            ));
+        }
+        if !self.each {
+            self.summary
+                .lengths
+                .sort_unstable_by(|left, right| right.cmp(left));
+            let threshold = self.summary.total_length / 2 + self.summary.total_length % 2;
+            let mut cumulative = 0u64;
+            for &length in &self.summary.lengths {
+                cumulative += length;
+                if cumulative >= threshold {
+                    self.summary.n50 = length;
+                    break;
+                }
             }
         }
+        Ok(self.summary)
     }
-    Ok(summary)
 }
 
 fn add_record(
