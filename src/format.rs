@@ -1,12 +1,9 @@
-use crate::{
-    FormatArgs, ensure_distinct_input_output,
-    output::{InputSource, with_output},
-    read_lines_from_file,
-};
+use crate::{FormatArgs, ensure_distinct_input_output, output::with_output, read_lines_from_file};
 use fasta_util::LinesInFile;
 use std::{
     fs::File,
-    io::{self, Write},
+    io::{self, BufRead, Write},
+    path::Path,
 };
 
 pub(super) fn run(args: FormatArgs) -> Result<(), Box<dyn std::error::Error>> {
@@ -16,13 +13,28 @@ pub(super) fn run(args: FormatArgs) -> Result<(), Box<dyn std::error::Error>> {
         ensure_distinct_input_output(input, output)?;
     }
 
-    let input = InputSource::from_optional_path(args.input.as_deref())?;
-    let file = File::open(input.path())?;
-    // SAFETY: The input file must not change while its memory map is alive.
-    let lines = unsafe { read_lines_from_file(file)? };
-    with_output(args.output.as_deref(), |writer| {
-        format_records(&lines, &args, writer)
-    })?;
+    match args.input.as_deref() {
+        None => {
+            let stdin = io::stdin();
+            with_output(args.output.as_deref(), |writer| {
+                format_reader(stdin.lock(), &args, writer)
+            })?;
+        }
+        Some(path) if path == Path::new("-") => {
+            let stdin = io::stdin();
+            with_output(args.output.as_deref(), |writer| {
+                format_reader(stdin.lock(), &args, writer)
+            })?;
+        }
+        Some(path) => {
+            let file = File::open(path)?;
+            // SAFETY: The input file must not change while its memory map is alive.
+            let lines = unsafe { read_lines_from_file(file)? };
+            with_output(args.output.as_deref(), |writer| {
+                format_records(&lines, &args, writer)
+            })?;
+        }
+    }
     Ok(())
 }
 
@@ -31,18 +43,64 @@ fn format_records(
     args: &FormatArgs,
     writer: &mut impl Write,
 ) -> io::Result<()> {
-    let mut saw_record = false;
-    let mut record_has_sequence = false;
-    let mut sequence_line = Vec::new();
+    let mut formatter = Formatter::new(args, writer);
+    lines.try_for_each_line(|line_number, line| formatter.process_line(line_number, line))?;
+    formatter.finish()
+}
 
-    lines.try_for_each_line(|line_number, raw_line| {
+fn format_reader(
+    mut reader: impl BufRead,
+    args: &FormatArgs,
+    writer: &mut impl Write,
+) -> io::Result<()> {
+    let mut formatter = Formatter::new(args, writer);
+    let mut line = Vec::new();
+    let mut line_number = 0usize;
+    loop {
+        line.clear();
+        if reader.read_until(b'\n', &mut line)? == 0 {
+            break;
+        }
+        line_number = line_number
+            .checked_add(1)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "line number overflow"))?;
+        formatter.process_line(line_number, &line)?;
+    }
+    formatter.finish()
+}
+
+struct Formatter<'a, W: Write> {
+    args: &'a FormatArgs,
+    writer: &'a mut W,
+    saw_record: bool,
+    record_has_sequence: bool,
+    sequence_line: Vec<u8>,
+}
+
+impl<'a, W: Write> Formatter<'a, W> {
+    fn new(args: &'a FormatArgs, writer: &'a mut W) -> Self {
+        Self {
+            args,
+            writer,
+            saw_record: false,
+            record_has_sequence: false,
+            sequence_line: Vec::new(),
+        }
+    }
+
+    fn process_line(&mut self, line_number: usize, raw_line: &[u8]) -> io::Result<()> {
         let line = strip_line_ending(raw_line);
         if line.first() == Some(&b'>') {
-            if saw_record {
-                finish_record(args.width, record_has_sequence, &mut sequence_line, writer)?;
+            if self.saw_record {
+                finish_record(
+                    self.args.width,
+                    self.record_has_sequence,
+                    &mut self.sequence_line,
+                    self.writer,
+                )?;
             }
             let header = &line[1..];
-            let normalized_header = if args.trim_header {
+            let normalized_header = if self.args.trim_header {
                 header.trim_ascii()
             } else {
                 header
@@ -50,15 +108,15 @@ fn format_records(
             if normalized_header.trim_ascii().is_empty() {
                 return Err(line_error(line_number, "record identifier is empty"));
             }
-            writer.write_all(b">")?;
-            writer.write_all(normalized_header)?;
-            writer.write_all(b"\n")?;
-            saw_record = true;
-            record_has_sequence = false;
+            self.writer.write_all(b">")?;
+            self.writer.write_all(normalized_header)?;
+            self.writer.write_all(b"\n")?;
+            self.saw_record = true;
+            self.record_has_sequence = false;
             return Ok(());
         }
 
-        if !saw_record {
+        if !self.saw_record {
             if line.is_empty() {
                 return Ok(());
             }
@@ -75,36 +133,43 @@ fn format_records(
                     &format!("whitespace in sequence at column {}", column + 1),
                 ));
             }
-            if args.remove_gaps && byte == b'-' {
+            if self.args.remove_gaps && byte == b'-' {
                 continue;
             }
-            if args.uppercase {
+            if self.args.uppercase {
                 byte.make_ascii_uppercase();
-            } else if args.lowercase {
+            } else if self.args.lowercase {
                 byte.make_ascii_lowercase();
             }
-            record_has_sequence = true;
-            if args.width == 0 {
-                writer.write_all(&[byte])?;
+            self.record_has_sequence = true;
+            if self.args.width == 0 {
+                self.writer.write_all(&[byte])?;
             } else {
-                sequence_line.push(byte);
-                if sequence_line.len() == args.width {
-                    writer.write_all(&sequence_line)?;
-                    writer.write_all(b"\n")?;
-                    sequence_line.clear();
+                self.sequence_line.push(byte);
+                if self.sequence_line.len() == self.args.width {
+                    self.writer.write_all(&self.sequence_line)?;
+                    self.writer.write_all(b"\n")?;
+                    self.sequence_line.clear();
                 }
             }
         }
         Ok(())
-    })?;
-
-    if !saw_record {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "no FASTA records found",
-        ));
     }
-    finish_record(args.width, record_has_sequence, &mut sequence_line, writer)
+
+    fn finish(mut self) -> io::Result<()> {
+        if !self.saw_record {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "no FASTA records found",
+            ));
+        }
+        finish_record(
+            self.args.width,
+            self.record_has_sequence,
+            &mut self.sequence_line,
+            self.writer,
+        )
+    }
 }
 
 fn finish_record(
