@@ -15,9 +15,9 @@ use crossbeam::channel::Receiver;
 use fasta_util::{
     LinesInFile, is_amino_acid, is_nucleic_acid, read_lines_from_file, read_lines_from_stdin,
 };
-use output::TemporaryOutput;
+use output::with_output;
 use std::{
-    io::{self, BufWriter, Write},
+    io::{self, Write},
     path::{Path, PathBuf},
 };
 
@@ -517,30 +517,17 @@ fn write_global_range(args: GlobalRangeArgs) -> Result<(), Box<dyn std::error::E
     }
 
     if let Some(index_path) = &args.fai_index {
-        let mut temporary_output = args
-            .output
-            .as_deref()
-            .map(TemporaryOutput::create)
-            .transpose()?;
-        let output: Box<dyn Write> = match temporary_output.as_mut() {
-            Some(temporary_output) => Box::new(temporary_output.take_file()?),
-            None => Box::new(std::io::stdout().lock()),
-        };
-        let mut writer = BufWriter::new(output);
-        fasta_index::write_slice(
-            &args.input,
-            index_path,
-            args.start,
-            Some(args.end_exclusive),
-            args.chars_per_line,
-            args.sequence_type,
-            &mut writer,
-        )?;
-        writer.flush()?;
-        drop(writer);
-        if let Some(temporary_output) = &mut temporary_output {
-            temporary_output.commit()?;
-        }
+        with_output(args.output.as_deref(), |writer| {
+            fasta_index::write_slice(
+                &args.input,
+                index_path,
+                args.start,
+                Some(args.end_exclusive),
+                args.chars_per_line,
+                args.sequence_type,
+                writer,
+            )
+        })?;
         return Ok(());
     }
 
@@ -556,23 +543,10 @@ fn write_global_range(args: GlobalRangeArgs) -> Result<(), Box<dyn std::error::E
     // this command only reads the file and never modifies it.
     let file_lines = unsafe { read_lines_from_file(input)? };
 
-    let mut temporary_output = args
-        .output
-        .as_deref()
-        .map(TemporaryOutput::create)
-        .transpose()?;
-    let output: Box<dyn Write> = match temporary_output.as_mut() {
-        Some(temporary_output) => Box::new(temporary_output.take_file()?),
-        None => Box::new(std::io::stdout().lock()),
-    };
-
-    let mut writer = Writer::new(output, writer_options);
-
-    writer.run_file(&file_lines)?;
-    drop(writer);
-    if let Some(temporary_output) = &mut temporary_output {
-        temporary_output.commit()?;
-    }
+    with_output(args.output.as_deref(), |output| {
+        let mut writer = Writer::new(output, writer_options);
+        writer.run_file(&file_lines)
+    })?;
 
     Ok(())
 }
@@ -584,7 +558,7 @@ struct WriterOptions {
     sequence_type: SequenceType,
 }
 struct Writer<T: std::io::Write> {
-    inner: BufWriter<T>,
+    inner: T,
     options: WriterOptions,
     count: usize,
     written: usize,
@@ -592,7 +566,7 @@ struct Writer<T: std::io::Write> {
 impl<T: std::io::Write> Writer<T> {
     fn new(inner: T, options: WriterOptions) -> Self {
         Self {
-            inner: BufWriter::new(inner),
+            inner,
             options,
             count: 0,
             written: 0,
@@ -722,7 +696,7 @@ mod tests {
 
         let mut writer = Writer::new(Vec::new(), options);
         writer.run(rx)?;
-        Ok(writer.inner.into_inner().unwrap())
+        Ok(writer.inner)
     }
 
     fn write_fasta_for_range(

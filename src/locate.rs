@@ -1,13 +1,13 @@
 use crate::{
     LocateArgs, ensure_distinct_input_output, is_nucleic_acid,
-    output::{InputSource, TemporaryOutput},
+    output::{InputSource, with_output},
     read_lines_from_file,
 };
 use fasta_util::LinesInFile;
 use std::{
     collections::VecDeque,
     fs::File,
-    io::{self, BufWriter, Write},
+    io::{self, Write},
 };
 
 pub(super) fn run(args: LocateArgs) -> Result<(), Box<dyn std::error::Error>> {
@@ -29,28 +29,15 @@ pub(super) fn run(args: LocateArgs) -> Result<(), Box<dyn std::error::Error>> {
     let file = File::open(input.path())?;
     // SAFETY: The input file must not change while its memory map is alive.
     let lines = unsafe { read_lines_from_file(file)? };
-    let mut temporary_output = args
-        .output
-        .as_deref()
-        .map(TemporaryOutput::create)
-        .transpose()?;
-    let output: Box<dyn Write> = match temporary_output.as_mut() {
-        Some(temporary_output) => Box::new(temporary_output.take_file()?),
-        None => Box::new(io::stdout().lock()),
-    };
-    let mut writer = BufWriter::new(output);
-    locate_matches(
-        &lines,
-        &pattern,
-        &reverse_pattern,
-        args.max_mismatch,
-        &mut writer,
-    )?;
-    writer.flush()?;
-    drop(writer);
-    if let Some(temporary_output) = &mut temporary_output {
-        temporary_output.commit()?;
-    }
+    with_output(args.output.as_deref(), |writer| {
+        locate_matches(
+            &lines,
+            &pattern,
+            &reverse_pattern,
+            args.max_mismatch,
+            writer,
+        )
+    })?;
     Ok(())
 }
 

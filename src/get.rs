@@ -1,12 +1,12 @@
 use crate::{
     GetArgs, SequenceType, fasta_index,
-    output::{InputSource, TemporaryOutput},
+    output::{InputSource, with_output},
     read_lines_from_file, validated_sequence_for,
 };
 use std::{
     collections::HashSet,
     fs::{self, File},
-    io::{self, BufWriter, Write},
+    io::{self, Write},
     path::Path,
 };
 
@@ -96,58 +96,43 @@ pub(super) fn run(args: GetArgs) -> Result<(), Box<dyn std::error::Error>> {
         crate::ensure_distinct_input_output(index, output)?;
     }
 
-    let mut temporary_output = args
-        .output
-        .as_deref()
-        .map(TemporaryOutput::create)
-        .transpose()?;
-    let output: Box<dyn Write> = match temporary_output.as_mut() {
-        Some(temporary_output) => Box::new(temporary_output.take_file()?),
-        None => Box::new(io::stdout().lock()),
-    };
-    let mut writer = BufWriter::new(output);
-
-    let matched = if let Some(index_path) = &index_path {
-        let named_ranges = queries
-            .iter()
-            .map(|query| fasta_index::NamedRange {
-                name: &query.id,
-                start: query.start,
-                end_exclusive: query.end_exclusive,
-                region_header: query.region_header.as_deref(),
-            })
-            .collect::<Vec<_>>();
-        fasta_index::write_named_ranges(
-            input_path,
-            index_path,
-            &named_ranges,
-            args.chars_per_line,
-            args.sequence_type,
-            &mut writer,
-        )?
-    } else {
-        write_from_stream(
-            input_path,
-            &queries,
-            args.chars_per_line,
-            args.sequence_type,
-            &mut writer,
-        )?
-    };
-    if let Some(index) = matched.iter().position(|matched| !matched) {
-        let id = String::from_utf8_lossy(&queries[index].id);
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("record `{id}` was not found"),
-        )
-        .into());
-    }
-
-    writer.flush()?;
-    drop(writer);
-    if let Some(temporary_output) = &mut temporary_output {
-        temporary_output.commit()?;
-    }
+    with_output(args.output.as_deref(), |writer| {
+        let matched = if let Some(index_path) = &index_path {
+            let named_ranges = queries
+                .iter()
+                .map(|query| fasta_index::NamedRange {
+                    name: &query.id,
+                    start: query.start,
+                    end_exclusive: query.end_exclusive,
+                    region_header: query.region_header.as_deref(),
+                })
+                .collect::<Vec<_>>();
+            fasta_index::write_named_ranges(
+                input_path,
+                index_path,
+                &named_ranges,
+                args.chars_per_line,
+                args.sequence_type,
+                writer,
+            )?
+        } else {
+            write_from_stream(
+                input_path,
+                &queries,
+                args.chars_per_line,
+                args.sequence_type,
+                writer,
+            )?
+        };
+        if let Some(index) = matched.iter().position(|matched| !matched) {
+            let id = String::from_utf8_lossy(&queries[index].id);
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("record `{id}` was not found"),
+            ));
+        }
+        Ok(())
+    })?;
     Ok(())
 }
 

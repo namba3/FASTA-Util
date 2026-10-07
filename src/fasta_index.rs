@@ -1,9 +1,9 @@
-use crate::{SequenceType, output::TemporaryOutput, strip_line_ending, validated_sequence_for};
+use crate::{SequenceType, output::with_output, strip_line_ending, validated_sequence_for};
 use std::{
     collections::HashSet,
     ffi::OsString,
     fs::File,
-    io::{self, BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write},
+    io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
 };
 
@@ -34,14 +34,7 @@ pub(super) fn index_path(input_path: &Path) -> PathBuf {
 
 pub(super) fn create_index(input_path: &Path, index_path: &Path) -> io::Result<usize> {
     let input = File::open(input_path)?;
-    let mut temporary_output = TemporaryOutput::create(index_path)?;
-    let output = temporary_output.take_file()?;
-    let mut writer = BufWriter::new(output);
-    let record_count = write_index(input, &mut writer)?;
-    writer.flush()?;
-    drop(writer);
-    temporary_output.commit()?;
-    Ok(record_count)
+    with_output(Some(index_path), |writer| write_index(input, writer))
 }
 
 fn write_index<W: Write>(input: File, writer: &mut W) -> io::Result<usize> {

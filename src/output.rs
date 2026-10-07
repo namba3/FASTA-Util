@@ -1,6 +1,6 @@
 use std::{
     fs::{self, File, OpenOptions, Permissions},
-    io::{self, Read, Write},
+    io::{self, BufWriter, Read, Write},
     path::{Path, PathBuf},
     sync::atomic::{AtomicUsize, Ordering},
 };
@@ -162,6 +162,25 @@ impl Drop for TemporaryOutput {
             let _ = fs::remove_file(&self.temporary);
         }
     }
+}
+
+pub(super) fn with_output<T>(
+    destination: Option<&Path>,
+    write: impl FnOnce(&mut BufWriter<Box<dyn Write>>) -> io::Result<T>,
+) -> io::Result<T> {
+    let mut temporary_output = destination.map(TemporaryOutput::create).transpose()?;
+    let output: Box<dyn Write> = match temporary_output.as_mut() {
+        Some(temporary_output) => Box::new(temporary_output.take_file()?),
+        None => Box::new(io::stdout().lock()),
+    };
+    let mut writer = BufWriter::new(output);
+    let result = write(&mut writer)?;
+    writer.flush()?;
+    drop(writer);
+    if let Some(temporary_output) = &mut temporary_output {
+        temporary_output.commit()?;
+    }
+    Ok(result)
 }
 
 #[cfg(test)]

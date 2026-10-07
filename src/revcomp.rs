@@ -1,12 +1,12 @@
 use crate::{
     RevcompArgs, ensure_distinct_input_output, is_nucleic_acid,
-    output::{InputSource, TemporaryOutput},
+    output::{InputSource, with_output},
     read_lines_from_file,
 };
 use fasta_util::LinesInFile;
 use std::{
     fs::File,
-    io::{self, BufWriter, Read, Seek, SeekFrom, Write},
+    io::{self, Read, Seek, SeekFrom, Write},
 };
 
 const REVERSE_READ_SIZE: usize = 64 * 1024;
@@ -33,34 +33,21 @@ pub(super) fn run(args: RevcompArgs) -> Result<(), Box<dyn std::error::Error>> {
     let records = scan_records(&lines)?;
 
     let mut input = File::open(input_source.path())?;
-    let mut temporary_output = args
-        .output
-        .as_deref()
-        .map(TemporaryOutput::create)
-        .transpose()?;
-    let output: Box<dyn Write> = match temporary_output.as_mut() {
-        Some(temporary_output) => Box::new(temporary_output.take_file()?),
-        None => Box::new(io::stdout().lock()),
-    };
-    let mut writer = BufWriter::new(output);
-    let mut block = vec![0; REVERSE_READ_SIZE];
-    let mut sequence_line = Vec::new();
-
-    for record in &records {
-        reverse_complement_record(
-            &mut input,
-            record,
-            args.chars_per_line,
-            &mut block,
-            &mut sequence_line,
-            &mut writer,
-        )?;
-    }
-    writer.flush()?;
-    drop(writer);
-    if let Some(temporary_output) = &mut temporary_output {
-        temporary_output.commit()?;
-    }
+    with_output(args.output.as_deref(), |writer| {
+        let mut block = vec![0; REVERSE_READ_SIZE];
+        let mut sequence_line = Vec::new();
+        for record in &records {
+            reverse_complement_record(
+                &mut input,
+                record,
+                args.chars_per_line,
+                &mut block,
+                &mut sequence_line,
+                writer,
+            )?;
+        }
+        Ok(())
+    })?;
     Ok(())
 }
 

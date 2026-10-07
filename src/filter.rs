@@ -1,12 +1,12 @@
 use crate::{
     FilterArgs, StatsSequenceType, ensure_distinct_input_output, is_amino_acid, is_nucleic_acid,
-    output::{InputSource, TemporaryOutput},
+    output::{InputSource, with_output},
     read_lines_from_file,
 };
 use fasta_util::LinesInFile;
 use std::{
     fs::File,
-    io::{self, BufWriter, Write},
+    io::{self, Write},
 };
 
 #[derive(Default)]
@@ -68,22 +68,9 @@ pub(super) fn run(args: FilterArgs) -> Result<(), Box<dyn std::error::Error>> {
     let lines = unsafe { read_lines_from_file(file)? };
     let selected = select_records(&lines, &args)?;
 
-    let mut temporary_output = args
-        .output
-        .as_deref()
-        .map(TemporaryOutput::create)
-        .transpose()?;
-    let output: Box<dyn Write> = match temporary_output.as_mut() {
-        Some(temporary_output) => Box::new(temporary_output.take_file()?),
-        None => Box::new(io::stdout().lock()),
-    };
-    let mut writer = BufWriter::new(output);
-    write_selected_records(&lines, &selected, &mut writer)?;
-    writer.flush()?;
-    drop(writer);
-    if let Some(temporary_output) = &mut temporary_output {
-        temporary_output.commit()?;
-    }
+    with_output(args.output.as_deref(), |writer| {
+        write_selected_records(&lines, &selected, writer)
+    })?;
     Ok(())
 }
 
