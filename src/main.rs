@@ -7,6 +7,7 @@ mod grep;
 mod locate;
 mod output;
 mod revcomp;
+mod selection_bitmap;
 mod stats;
 mod validate;
 

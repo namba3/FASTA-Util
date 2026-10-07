@@ -2,6 +2,7 @@ use crate::{
     GrepArgs, ensure_distinct_input_output,
     output::{InputSource, with_output},
     read_lines_from_file,
+    selection_bitmap::SelectionBitmap,
 };
 use fasta_util::LinesInFile;
 use std::{
@@ -31,9 +32,9 @@ pub(super) fn run(args: GrepArgs) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn select_records(lines: &LinesInFile, args: &GrepArgs) -> io::Result<Vec<bool>> {
+fn select_records(lines: &LinesInFile, args: &GrepArgs) -> io::Result<SelectionBitmap> {
     let pattern = args.pattern.as_bytes();
-    let mut selected = Vec::new();
+    let mut selected = SelectionBitmap::default();
     let mut saw_record = false;
 
     lines.try_for_each_line(|line_number, raw_line| {
@@ -83,7 +84,7 @@ fn contains(haystack: &[u8], needle: &[u8], ignore_case: bool) -> bool {
 
 fn write_selected_records(
     lines: &LinesInFile,
-    selected: &[bool],
+    selected: &SelectionBitmap,
     writer: &mut impl Write,
 ) -> io::Result<()> {
     let mut record_index = None;
@@ -91,7 +92,7 @@ fn write_selected_records(
         if raw_line.first() == Some(&b'>') {
             record_index = Some(record_index.map_or(0, |index: usize| index + 1));
         }
-        if record_index.is_some_and(|index| selected[index]) {
+        if record_index.is_some_and(|index| selected.get(index) == Some(true)) {
             writer.write_all(raw_line)?;
         }
         Ok(())

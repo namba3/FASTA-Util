@@ -2,6 +2,7 @@ use crate::{
     FilterArgs, StatsSequenceType, ensure_distinct_input_output, is_amino_acid, is_nucleic_acid,
     output::{InputSource, with_output},
     read_lines_from_file,
+    selection_bitmap::SelectionBitmap,
 };
 use fasta_util::LinesInFile;
 use std::{
@@ -74,8 +75,8 @@ pub(super) fn run(args: FilterArgs) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn select_records(lines: &LinesInFile, args: &FilterArgs) -> io::Result<Vec<bool>> {
-    let mut selected = Vec::new();
+fn select_records(lines: &LinesInFile, args: &FilterArgs) -> io::Result<SelectionBitmap> {
+    let mut selected = SelectionBitmap::default();
     let mut current: Option<Counts> = None;
     let mut saw_record = false;
     let mut saw_protein_only = false;
@@ -191,7 +192,7 @@ fn fraction(count: u64, total: u64) -> f64 {
 
 fn write_selected_records(
     lines: &LinesInFile,
-    selected: &[bool],
+    selected: &SelectionBitmap,
     writer: &mut impl Write,
 ) -> io::Result<()> {
     let mut record_index = None;
@@ -199,7 +200,7 @@ fn write_selected_records(
         if raw_line.first() == Some(&b'>') {
             record_index = Some(record_index.map_or(0, |index: usize| index + 1));
         }
-        if record_index.is_some_and(|index| selected[index]) {
+        if record_index.is_some_and(|index| selected.get(index) == Some(true)) {
             writer.write_all(raw_line)?;
         }
         Ok(())

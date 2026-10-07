@@ -639,6 +639,51 @@ fn filter_writes_selected_records_to_a_file() {
 }
 
 #[test]
+fn filter_and_grep_keep_selection_order_across_bitmap_word_boundaries() {
+    let selected_indices = [0, 63, 64, 69];
+    let mut contents = Vec::new();
+    let mut expected = Vec::new();
+    for index in 0..70 {
+        let selected = selected_indices.contains(&index);
+        let header = if selected {
+            format!(">keep-{index}\n")
+        } else {
+            format!(">skip-{index}\n")
+        };
+        contents.extend_from_slice(header.as_bytes());
+        if selected {
+            contents.extend_from_slice(b"AC\n");
+            expected.extend_from_slice(header.as_bytes());
+            expected.extend_from_slice(b"AC\n");
+        } else {
+            contents.extend_from_slice(b"A\n");
+        }
+    }
+    let input = TemporaryFile::new(&contents);
+
+    let filtered = run_fasta_util(&["filter", input.path(), "--min-len", "2"], b"");
+    let grepped = run_fasta_util(&["grep", input.path(), "keep-"], b"");
+
+    assert!(
+        filtered.status.success(),
+        "{}",
+        String::from_utf8_lossy(&filtered.stderr)
+    );
+    assert!(
+        grepped.status.success(),
+        "{}",
+        String::from_utf8_lossy(&grepped.stderr)
+    );
+    assert_eq!(filtered.stdout, expected);
+    let grep_expected = selected_indices
+        .iter()
+        .flat_map(|index| [format!(">keep-{index}\n").into_bytes(), b"AC\n".to_vec()])
+        .flatten()
+        .collect::<Vec<_>>();
+    assert_eq!(grepped.stdout, grep_expected);
+}
+
+#[test]
 fn filter_rejects_missing_or_contradictory_conditions() {
     let input = TemporaryFile::new(b">record\nACGT\n");
     let no_conditions = run_fasta_util(&["filter", input.path()], b"");
