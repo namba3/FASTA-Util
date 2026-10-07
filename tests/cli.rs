@@ -824,6 +824,21 @@ fn remaining_fasta_commands_accept_standard_input_with_dash_or_omitted_path() {
 }
 
 #[test]
+fn validate_streams_multirecord_stdin_with_omitted_path_or_dash() {
+    let fasta = b">first\r\nACGT\r\n>second\nAACC\n";
+    for args in [&["validate"][..], &["validate", "-"][..]] {
+        let output = run_fasta_util(args, fasta);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stdout, b"OK: 2 records\ntype: DNA\n");
+        assert!(output.stderr.is_empty());
+    }
+}
+
+#[test]
 fn get_reads_record_regions_and_global_ranges_from_standard_input() {
     let fasta = b">first description\nACGT\n>second description\nTGCA\n";
 

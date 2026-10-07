@@ -66,13 +66,25 @@ impl Reporter {
 }
 
 pub(super) fn run(path: Option<&Path>, sequence_type: SequenceType) -> io::Result<bool> {
-    let input = crate::output::InputSource::from_optional_path(path)?;
     let display_path = path
         .filter(|path| *path != Path::new("-"))
         .map(Path::to_path_buf)
         .unwrap_or_else(|| Path::new("stdin").to_path_buf());
-    let file = File::open(input.path())?;
-    let mut reader = BufReader::new(file);
+
+    if let Some(path) = path.filter(|path| *path != Path::new("-")) {
+        let file = File::open(path)?;
+        run_reader(BufReader::new(file), &display_path, sequence_type)
+    } else {
+        let stdin = io::stdin();
+        run_reader(stdin.lock(), &display_path, sequence_type)
+    }
+}
+
+fn run_reader(
+    mut reader: impl BufRead,
+    display_path: &Path,
+    sequence_type: SequenceType,
+) -> io::Result<bool> {
     let mut reporter = Reporter::default();
     let mut records = 0usize;
     let mut line_number = 0usize;
