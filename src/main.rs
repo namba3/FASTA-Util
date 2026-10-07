@@ -19,7 +19,7 @@ use fasta_util::{
 };
 use output::with_output;
 use std::{
-    io::{self, Write},
+    io::{self, BufRead, Write},
     path::{Path, PathBuf},
 };
 
@@ -498,6 +498,24 @@ fn line_error(line_number: usize, message: &str) -> io::Error {
     )
 }
 
+fn for_each_reader_line(
+    mut reader: impl BufRead,
+    mut visitor: impl FnMut(usize, &[u8]) -> io::Result<()>,
+) -> io::Result<()> {
+    let mut line = Vec::new();
+    let mut line_number = 0usize;
+    loop {
+        line.clear();
+        if reader.read_until(b'\n', &mut line)? == 0 {
+            return Ok(());
+        }
+        line_number = line_number
+            .checked_add(1)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "line number overflow"))?;
+        visitor(line_number, &line)?;
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 #[cfg(test)]
 struct SequenceRange {
@@ -699,11 +717,12 @@ impl<T: std::io::Write> Writer<T> {
 mod tests {
     use super::{
         Args, SequenceRange, SequenceType, Writer, WriterOptions, count_sequence_bases,
-        count_sequence_line, line_error, strip_line_ending, validated_sequence, write_length,
+        count_sequence_line, for_each_reader_line, line_error, strip_line_ending,
+        validated_sequence, write_length,
     };
     use clap::Parser;
     use crossbeam::channel::unbounded;
-    use std::io;
+    use std::io::{self, Cursor};
 
     fn write_fasta(lines: &[&[u8]], options: WriterOptions) -> Vec<u8> {
         write_fasta_result(lines, options).unwrap()
@@ -1016,6 +1035,31 @@ mod tests {
 
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
         assert_eq!(error.to_string(), "line 12: invalid sequence symbol");
+    }
+
+    #[test]
+    fn reader_line_visitor_preserves_bytes_and_one_based_numbers() {
+        let mut lines = Vec::new();
+        for_each_reader_line(Cursor::new(b"first\r\nsecond"), |number, line| {
+            lines.push((number, line.to_vec()));
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(lines, [(1, b"first\r\n".to_vec()), (2, b"second".to_vec())]);
+    }
+
+    #[test]
+    fn reader_line_visitor_propagates_errors_and_stops_reading() {
+        let mut visited = Vec::new();
+        let error = for_each_reader_line(Cursor::new(b"first\nsecond\n"), |number, line| {
+            visited.push((number, line.to_vec()));
+            Err(io::Error::new(io::ErrorKind::InvalidData, "stop"))
+        })
+        .unwrap_err();
+
+        assert_eq!(error.to_string(), "stop");
+        assert_eq!(visited, [(1, b"first\n".to_vec())]);
     }
 
     #[test]

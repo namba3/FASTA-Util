@@ -1,9 +1,12 @@
-use crate::{SequenceType, output::with_output, strip_line_ending, validated_sequence_for};
+use crate::{
+    SequenceType, for_each_reader_line, output::with_output, strip_line_ending,
+    validated_sequence_for,
+};
 use std::{
     collections::HashSet,
     ffi::OsString,
     fs::File,
-    io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write},
+    io::{self, BufReader, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
 };
 
@@ -38,27 +41,20 @@ pub(super) fn create_index(input_path: &Path, index_path: &Path) -> io::Result<u
 }
 
 fn write_index<W: Write>(input: File, writer: &mut W) -> io::Result<usize> {
-    let mut reader = BufReader::new(input);
-    let mut line = Vec::new();
+    let reader = BufReader::new(input);
     let mut byte_offset = 0u64;
-    let mut line_number = 0usize;
     let mut records = 0usize;
     let mut current_record: Option<IndexRecord> = None;
     let mut names = HashSet::<Vec<u8>>::new();
 
-    loop {
-        line.clear();
-        if reader.read_until(b'\n', &mut line)? == 0 {
-            break;
-        }
-        line_number += 1;
+    for_each_reader_line(reader, |line_number, line| {
         let raw_line_length = u64::try_from(line.len()).map_err(|_| {
             io::Error::new(io::ErrorKind::InvalidData, "FASTA byte offset overflow")
         })?;
         let next_byte_offset = byte_offset.checked_add(raw_line_length).ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidData, "FASTA byte offset overflow")
         })?;
-        let (content, ending) = strip_index_line_ending(&line);
+        let (content, ending) = strip_index_line_ending(line);
 
         if content.first() == Some(&b'>') {
             if let Some(record) = current_record.take() {
@@ -93,7 +89,7 @@ fn write_index<W: Write>(input: File, writer: &mut W) -> io::Result<usize> {
             });
             records += 1;
             byte_offset = next_byte_offset;
-            continue;
+            return Ok(());
         }
 
         let Some(record) = current_record.as_mut() else {
@@ -158,7 +154,8 @@ fn write_index<W: Write>(input: File, writer: &mut W) -> io::Result<usize> {
             .checked_add(content.len())
             .ok_or_else(|| index_error(line_number, "sequence length overflow"))?;
         byte_offset = next_byte_offset;
-    }
+        Ok(())
+    })?;
 
     if let Some(record) = current_record {
         write_index_record(record, writer)?;
@@ -354,18 +351,11 @@ pub(super) fn write_slice<W: Write>(
 
 fn read_index(path: &Path) -> io::Result<Vec<FaiRecord>> {
     let file = File::open(path)?;
-    let mut reader = BufReader::new(file);
+    let reader = BufReader::new(file);
     let mut records = Vec::new();
-    let mut line = Vec::new();
-    let mut line_number = 0usize;
 
-    loop {
-        line.clear();
-        if reader.read_until(b'\n', &mut line)? == 0 {
-            break;
-        }
-        line_number += 1;
-        let line = strip_line_ending(&line);
+    for_each_reader_line(reader, |line_number, raw_line| {
+        let line = strip_line_ending(raw_line);
         if line.is_empty() {
             return Err(invalid_index_line(line_number, "empty index row"));
         }
@@ -414,7 +404,8 @@ fn read_index(path: &Path) -> io::Result<Vec<FaiRecord>> {
             line_bases,
             line_width,
         });
-    }
+        Ok(())
+    })?;
 
     Ok(records)
 }

@@ -1,6 +1,6 @@
 use crate::{
-    FormatArgs, ensure_distinct_input_output, line_error, output::with_output,
-    read_lines_from_file, strip_line_ending,
+    FormatArgs, ensure_distinct_input_output, for_each_reader_line, line_error,
+    output::with_output, read_lines_from_file, strip_line_ending,
 };
 use fasta_util::LinesInFile;
 use std::{
@@ -52,23 +52,14 @@ fn format_records(
 }
 
 fn format_reader(
-    mut reader: impl BufRead,
+    reader: impl BufRead,
     args: &FormatArgs,
     writer: &mut impl Write,
 ) -> io::Result<()> {
     let mut formatter = Formatter::new(args, writer);
-    let mut line = Vec::new();
-    let mut line_number = 0usize;
-    loop {
-        line.clear();
-        if reader.read_until(b'\n', &mut line)? == 0 {
-            break;
-        }
-        line_number = line_number
-            .checked_add(1)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "line number overflow"))?;
-        formatter.process_line(line_number, &line)?;
-    }
+    for_each_reader_line(reader, |line_number, line| {
+        formatter.process_line(line_number, line)
+    })?;
     formatter.finish()
 }
 

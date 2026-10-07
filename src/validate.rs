@@ -1,4 +1,4 @@
-use crate::SequenceType;
+use crate::{SequenceType, for_each_reader_line};
 use std::{
     collections::HashMap,
     fs::File,
@@ -81,26 +81,19 @@ pub(super) fn run(path: Option<&Path>, sequence_type: SequenceType) -> io::Resul
 }
 
 fn run_reader(
-    mut reader: impl BufRead,
+    reader: impl BufRead,
     display_path: &Path,
     sequence_type: SequenceType,
 ) -> io::Result<bool> {
     let mut reporter = Reporter::default();
     let mut records = 0usize;
-    let mut line_number = 0usize;
-    let mut buffer = Vec::new();
     let mut current_record: Option<Record> = None;
     let mut ids = HashMap::<Vec<u8>, (usize, Vec<u8>)>::new();
     let mut first_t: Option<(usize, usize, Vec<u8>)> = None;
     let mut first_u: Option<(usize, usize, Vec<u8>)> = None;
 
-    loop {
-        buffer.clear();
-        if reader.read_until(b'\n', &mut buffer)? == 0 {
-            break;
-        }
-        line_number += 1;
-        let (line, line_ending) = strip_line_ending(&buffer);
+    for_each_reader_line(reader, |line_number, buffer| {
+        let (line, line_ending) = strip_line_ending(buffer);
 
         if line.first() == Some(&b'>') {
             if let Some(record) = current_record.take() {
@@ -146,7 +139,7 @@ fn run_reader(
                 id,
                 ..Record::default()
             });
-            continue;
+            return Ok(());
         }
 
         if current_record.is_none() {
@@ -160,7 +153,7 @@ fn run_reader(
                     None,
                 );
             }
-            continue;
+            return Ok(());
         }
 
         let record = current_record.as_mut().expect("record was checked above");
@@ -173,7 +166,7 @@ fn run_reader(
                 "blank sequence line is incompatible with `.fai` indexing",
                 None,
             );
-            continue;
+            return Ok(());
         }
 
         if let Some(ending) = line_ending {
@@ -239,7 +232,8 @@ fn run_reader(
                 );
             }
         }
-    }
+        Ok(())
+    })?;
 
     if let Some(record) = current_record.take() {
         finish_record(display_path, record, &mut reporter);

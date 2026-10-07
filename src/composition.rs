@@ -1,11 +1,11 @@
 use crate::{
-    StatsSequenceType, is_amino_acid, is_nucleic_acid, line_error, read_lines_from_file,
-    strip_line_ending,
+    StatsSequenceType, for_each_reader_line, is_amino_acid, is_nucleic_acid, line_error,
+    read_lines_from_file, strip_line_ending,
 };
 use fasta_util::LinesInFile;
 use std::{
     fs::File,
-    io::{self, BufRead, Write},
+    io::{self, Write},
     path::Path,
 };
 
@@ -69,22 +69,13 @@ fn collect_from_lines(
 }
 
 fn collect_from_reader(
-    mut reader: impl BufRead,
+    reader: impl io::BufRead,
     sequence_type: StatsSequenceType,
 ) -> io::Result<Composition> {
     let mut composition = Composition::default();
-    let mut line = Vec::new();
-    let mut line_number = 0usize;
-    loop {
-        line.clear();
-        if reader.read_until(b'\n', &mut line)? == 0 {
-            break;
-        }
-        line_number = line_number
-            .checked_add(1)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "line number overflow"))?;
-        composition.process_line(line_number, strip_line_ending(&line), sequence_type)?;
-    }
+    for_each_reader_line(reader, |line_number, line| {
+        composition.process_line(line_number, strip_line_ending(line), sequence_type)
+    })?;
     composition.finish()
 }
 

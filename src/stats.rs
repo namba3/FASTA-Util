@@ -1,12 +1,8 @@
 use crate::{
-    LinesInFile, StatsFormat, StatsSequenceType, is_amino_acid, is_nucleic_acid,
-    read_lines_from_file, strip_line_ending,
+    LinesInFile, StatsFormat, StatsSequenceType, for_each_reader_line, is_amino_acid,
+    is_nucleic_acid, read_lines_from_file, strip_line_ending,
 };
-use std::{
-    fs::File,
-    io::{self, BufRead},
-    path::Path,
-};
+use std::{fs::File, io, path::Path};
 
 #[derive(Default)]
 struct RecordStats {
@@ -92,23 +88,14 @@ fn collect_stats(
 }
 
 fn collect_stats_from_reader(
-    mut reader: impl BufRead,
+    reader: impl io::BufRead,
     sequence_type: StatsSequenceType,
     each: bool,
 ) -> io::Result<Summary> {
     let mut collector = StatsCollector::new(sequence_type, each);
-    let mut line = Vec::new();
-    let mut line_number = 0usize;
-    loop {
-        line.clear();
-        if reader.read_until(b'\n', &mut line)? == 0 {
-            break;
-        }
-        line_number = line_number
-            .checked_add(1)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "line number overflow"))?;
-        collector.process_line(line_number, &line)?;
-    }
+    for_each_reader_line(reader, |line_number, line| {
+        collector.process_line(line_number, line)
+    })?;
     collector.finish()
 }
 

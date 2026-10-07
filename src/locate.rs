@@ -1,6 +1,6 @@
 use crate::{
-    LocateArgs, ensure_distinct_input_output, is_nucleic_acid, line_error, output::with_output,
-    read_lines_from_file, strip_line_ending,
+    LocateArgs, ensure_distinct_input_output, for_each_reader_line, is_nucleic_acid, line_error,
+    output::with_output, read_lines_from_file, strip_line_ending,
 };
 use fasta_util::LinesInFile;
 use std::{
@@ -92,25 +92,16 @@ fn locate_matches(
 }
 
 fn locate_matches_reader(
-    mut reader: impl BufRead,
+    reader: impl BufRead,
     pattern: &[u8],
     reverse_pattern: &[u8],
     max_mismatch: usize,
     writer: &mut impl Write,
 ) -> io::Result<()> {
     let mut scanner = LocateScanner::new(pattern, reverse_pattern, max_mismatch, writer);
-    let mut line = Vec::new();
-    let mut line_number = 0usize;
-    loop {
-        line.clear();
-        if reader.read_until(b'\n', &mut line)? == 0 {
-            break;
-        }
-        line_number = line_number
-            .checked_add(1)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "line number overflow"))?;
-        scanner.process_line(line_number, &line)?;
-    }
+    for_each_reader_line(reader, |line_number, line| {
+        scanner.process_line(line_number, line)
+    })?;
     scanner.finish()
 }
 
