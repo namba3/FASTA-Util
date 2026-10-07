@@ -1351,6 +1351,33 @@ fn locate_matches_long_motifs_without_crossing_record_boundaries() {
 }
 
 #[test]
+fn locate_uses_bounded_mismatch_search_for_long_motifs() {
+    let motif = "A".repeat(65);
+    let two_mismatches = format!("{}CC{}", "A".repeat(32), "A".repeat(31));
+    let three_mismatches = format!("{}CCC{}", "A".repeat(32), "A".repeat(30));
+    let input = TemporaryFile::new(
+        format!(">exact\n{motif}\n>two\n{two_mismatches}\n>three\n{three_mismatches}\n").as_bytes(),
+    );
+
+    let two_allowed = run_fasta_util(
+        &["locate", input.path(), &motif, "--max-mismatch", "2"],
+        b"",
+    );
+    let three_allowed = run_fasta_util(
+        &["locate", input.path(), &motif, "--max-mismatch", "3"],
+        b"",
+    );
+
+    assert!(two_allowed.status.success());
+    assert_eq!(two_allowed.stdout, b"exact\t1\t65\t+\ntwo\t1\t65\t+\n");
+    assert!(three_allowed.status.success());
+    assert_eq!(
+        three_allowed.stdout,
+        b"exact\t1\t65\t+\ntwo\t1\t65\t+\nthree\t1\t65\t+\n"
+    );
+}
+
+#[test]
 fn locate_allows_a_bounded_number_of_mismatches() {
     let input = TemporaryFile::new(b">seq\nAATCAA\n");
     let exact = run_fasta_util(&["locate", input.path(), "AATAAA"], b"");

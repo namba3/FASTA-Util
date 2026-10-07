@@ -121,6 +121,8 @@ motif_32="$(motif_for_length 32)"
 motif_64="$(motif_for_length 64)"
 motif_128="$(motif_for_length 128)"
 motif_512="$(motif_for_length 512)"
+motif_64_three_mismatches="$(awk 'BEGIN { for (i=0; i<61; i++) printf "A"; print "CCC" }')"
+motif_512_three_mismatches="$(awk 'BEGIN { for (i=0; i<509; i++) printf "A"; print "CCC" }')"
 
 for motif in "$motif_8" "$motif_32" "$motif_64" "$motif_128" "$motif_512"; do
     output="$work_dir/no-hit.txt"
@@ -130,6 +132,18 @@ for motif in "$motif_8" "$motif_32" "$motif_64" "$motif_128" "$motif_512"; do
         exit 1
     fi
 done
+
+two_mismatch_output="$work_dir/two-mismatch-no-hit.txt"
+"$binary" locate "$locate_fasta" "$motif_64_three_mismatches" --max-mismatch 2 > "$two_mismatch_output"
+if [[ -s "$two_mismatch_output" ]]; then
+    printf 'Expected no matches with a two-mismatch allowance for a motif requiring three mismatches\n' >&2
+    exit 1
+fi
+"$binary" locate "$locate_fasta" "$motif_512_three_mismatches" --max-mismatch 2 > "$two_mismatch_output"
+if [[ -s "$two_mismatch_output" ]]; then
+    printf 'Expected no matches for the 512-base motif within a two-mismatch allowance\n' >&2
+    exit 1
+fi
 
 frequent_output="$work_dir/frequent-hits.txt"
 "$binary" locate "$locate_fasta" A > "$frequent_output"
@@ -170,6 +184,8 @@ q_motif_32="$(quote "$motif_32")"
 q_motif_64="$(quote "$motif_64")"
 q_motif_128="$(quote "$motif_128")"
 q_motif_512="$(quote "$motif_512")"
+q_motif_64_three_mismatches="$(quote "$motif_64_three_mismatches")"
+q_motif_512_three_mismatches="$(quote "$motif_512_three_mismatches")"
 
 printf 'Analysis benchmark input: %s bases, %s runs\n' "$bases" "$runs"
 printf 'stats records: %s (about 100 bases each), %s (about 10,000 bases each)\n' \
@@ -185,5 +201,7 @@ printf 'locate fixture: %s bases across 10,000-base records; correctness checks 
     -n 'locate (64-base near-match, no hits)' "$q_binary locate $q_locate_fasta $q_motif_64 > /dev/null" \
     -n 'locate (128-base near-match, no hits)' "$q_binary locate $q_locate_fasta $q_motif_128 > /dev/null" \
     -n 'locate (512-base near-match, no hits)' "$q_binary locate $q_locate_fasta $q_motif_512 > /dev/null" \
+    -n 'locate (64-base, two mismatches allowed, no hits)' "$q_binary locate $q_locate_fasta $q_motif_64_three_mismatches --max-mismatch 2 > /dev/null" \
+    -n 'locate (512-base, two mismatches allowed, no hits)' "$q_binary locate $q_locate_fasta $q_motif_512_three_mismatches --max-mismatch 2 > /dev/null" \
     -n 'locate (64-base, one mismatch allowed)' "$q_binary locate $q_locate_fasta $q_motif_64 --max-mismatch 1 > /dev/null" \
     -n 'locate (frequent one-base hits)' "$q_binary locate $q_locate_fasta A > /dev/null"
