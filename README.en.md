@@ -75,7 +75,10 @@ Count the total length of the sequence
 ```sh
 ./target/release/fasta-util len -i test.fna
 ./target/release/fasta-util len --sequence-type protein -i proteins.faa
+./target/release/fasta-util len -i genome.fa --threads 4
 ```
+
+File inputs can use multiple workers for length counting. Set the worker count with `--threads N`. When omitted, files smaller than 8 MiB are processed sequentially; larger files use up to 4 workers, limited by available CPUs. Standard input is processed sequentially.
 
 ```txt
 10000
@@ -92,7 +95,10 @@ The default `auto` mode selects protein when it finds a protein symbol that is n
 ./target/release/fasta-util stats genome.fa --each
 ./target/release/fasta-util stats genome.fa --format json
 ./target/release/fasta-util stats proteins.faa --sequence-type protein --format json
+./target/release/fasta-util stats genome.fa --threads 4
 ```
+
+File inputs accept `--threads N` to set the worker count. When omitted, files smaller than 8 MiB are processed sequentially; larger files use up to 4 workers, limited by available CPUs. Standard input is processed sequentially. Statistics split work at record boundaries, so a file containing one record is processed by one worker.
 
 ### composition
 
@@ -101,8 +107,11 @@ Show the fraction of each symbol across all sequence data. For nucleotides, the 
 ```sh
 ./target/release/fasta-util composition seq.fa
 ./target/release/fasta-util composition proteins.faa --sequence-type protein
+./target/release/fasta-util composition genome.fa --threads 4
 cat seq.fa | ./target/release/fasta-util composition
 ```
+
+File inputs accept `--threads N` to set the worker count. When omitted, files smaller than 8 MiB are processed sequentially; larger files use up to 4 workers, limited by available CPUs. Standard input is processed sequentially.
 
 ### filter
 

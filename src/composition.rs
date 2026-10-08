@@ -1,3 +1,4 @@
+use crate::parallel::{first_header_offset, line_chunks, process_chunks, worker_count};
 use crate::{
     StatsSequenceType, for_each_reader_line, is_amino_acid, is_nucleic_acid, line_error,
     read_lines_from_file, strip_line_ending,
@@ -6,6 +7,7 @@ use fasta_util::LinesInFile;
 use std::{
     fs::File,
     io::{self, Write},
+    num::NonZeroUsize,
     path::Path,
 };
 
@@ -35,7 +37,11 @@ impl Default for Composition {
     }
 }
 
-pub(super) fn run(path: Option<&Path>, sequence_type: StatsSequenceType) -> io::Result<()> {
+pub(super) fn run(
+    path: Option<&Path>,
+    sequence_type: StatsSequenceType,
+    threads: Option<NonZeroUsize>,
+) -> io::Result<()> {
     let composition = match path {
         None => {
             let stdin = io::stdin();
@@ -50,7 +56,7 @@ pub(super) fn run(path: Option<&Path>, sequence_type: StatsSequenceType) -> io::
             // SAFETY: This command only reads the input; the file must not be modified
             // while the memory map is alive.
             let lines = unsafe { read_lines_from_file(file)? };
-            collect_from_lines(&lines, sequence_type)?
+            collect_from_lines(&lines, sequence_type, threads)?
         }
     };
     let stdout = io::stdout();
@@ -60,11 +66,49 @@ pub(super) fn run(path: Option<&Path>, sequence_type: StatsSequenceType) -> io::
 fn collect_from_lines(
     lines: &LinesInFile,
     sequence_type: StatsSequenceType,
+    requested_threads: Option<NonZeroUsize>,
 ) -> io::Result<Composition> {
+    let bytes = lines.as_bytes();
+    let chunks = line_chunks(bytes, worker_count(bytes.len(), requested_threads));
+    let first_header = first_header_offset(bytes);
+    let partials = process_chunks(&chunks, |chunk| {
+        let mut composition = Composition {
+            saw_record: first_header.is_some_and(|offset| chunk.range.start > offset),
+            ..Composition::default()
+        };
+        for (line_index, raw_line) in chunk
+            .bytes
+            .split_inclusive(|byte| *byte == b'\n')
+            .enumerate()
+        {
+            composition.process_line(
+                chunk.start_line + line_index,
+                strip_line_ending(raw_line),
+                sequence_type,
+            )?;
+        }
+        Ok(composition)
+    });
+
     let mut composition = Composition::default();
-    lines.try_for_each_line(|line_number, raw_line| {
-        composition.process_line(line_number, strip_line_ending(raw_line), sequence_type)
-    })?;
+    for partial in partials {
+        let partial = partial?;
+        composition.total = composition
+            .total
+            .checked_add(partial.total)
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "sequence length overflow")
+            })?;
+        for (total, count) in composition.counts.iter_mut().zip(partial.counts) {
+            *total = total.checked_add(count).ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "symbol count overflow")
+            })?;
+        }
+        composition.saw_record |= partial.saw_record;
+        composition.saw_t |= partial.saw_t;
+        composition.saw_u |= partial.saw_u;
+        composition.saw_protein_only |= partial.saw_protein_only;
+    }
     composition.finish()
 }
 

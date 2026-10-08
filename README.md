@@ -75,7 +75,10 @@ fasta-util filter --min-len 1000 input.fa |
 ```sh
 ./target/release/fasta-util len -i test.fna
 ./target/release/fasta-util len --sequence-type protein -i proteins.faa
+./target/release/fasta-util len -i genome.fa --threads 4
 ```
+
+ファイル入力では複数workerで配列長を集計できます。`--threads N`でworker数を指定できます。省略時は8 MiB未満のファイルを逐次処理し、それ以上では利用可能なCPU数に応じて最大4 workerを使います。標準入力は逐次処理します。
 
 ```txt
 10000
@@ -92,7 +95,10 @@ FASTA全体のレコード数、合計・最小・最大・平均長、N50、GC�
 ./target/release/fasta-util stats genome.fa --each
 ./target/release/fasta-util stats genome.fa --format json
 ./target/release/fasta-util stats proteins.faa --sequence-type protein --format json
+./target/release/fasta-util stats genome.fa --threads 4
 ```
+
+ファイル入力では`--threads N`でworker数を指定できます。省略時は8 MiB未満のファイルを逐次処理し、それ以上では利用可能なCPU数に応じて最大4 workerを使います。標準入力は逐次処理します。統計ではrecord単位で分割するため、単一recordのファイルでは並列化されません。
 
 ### composition
 
@@ -101,8 +107,11 @@ FASTA全体のレコード数、合計・最小・最大・平均長、N50、GC�
 ```sh
 ./target/release/fasta-util composition seq.fa
 ./target/release/fasta-util composition proteins.faa --sequence-type protein
+./target/release/fasta-util composition genome.fa --threads 4
 cat seq.fa | ./target/release/fasta-util composition
 ```
+
+ファイル入力では`--threads N`でworker数を指定できます。省略時は8 MiB未満のファイルを逐次処理し、それ以上では利用可能なCPU数に応じて最大4 workerを使います。標準入力は逐次処理します。
 
 ### filter
 

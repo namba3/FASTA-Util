@@ -6,6 +6,7 @@ mod get;
 mod grep;
 mod locate;
 mod output;
+mod parallel;
 mod revcomp;
 mod selection_bitmap;
 mod stats;
@@ -20,6 +21,7 @@ use fasta_util::{
 use output::with_output;
 use std::{
     io::{self, BufRead, Write},
+    num::NonZeroUsize,
     path::{Path, PathBuf},
 };
 
@@ -92,6 +94,10 @@ struct StatsArgs {
     /// Sequence alphabet; auto selects protein if a protein-only symbol appears
     #[arg(long, value_enum, default_value_t = StatsSequenceType::Auto)]
     sequence_type: StatsSequenceType,
+
+    /// Worker threads for file input (default: auto)
+    #[arg(long, value_name = "N")]
+    threads: Option<NonZeroUsize>,
 }
 
 #[derive(Parser)]
@@ -102,6 +108,10 @@ struct CompositionArgs {
     /// Sequence alphabet; auto selects protein if a protein-only symbol appears
     #[arg(long, value_enum, default_value_t = StatsSequenceType::Auto)]
     sequence_type: StatsSequenceType,
+
+    /// Worker threads for file input (default: auto)
+    #[arg(long, value_name = "N")]
+    threads: Option<NonZeroUsize>,
 }
 
 #[derive(Parser)]
@@ -284,6 +294,10 @@ struct LenArgs {
         help = "Sequence alphabet to validate (nucleotide or protein)"
     )]
     sequence_type: SequenceType,
+
+    /// Worker threads for file input (default: auto)
+    #[arg(long, value_name = "N")]
+    threads: Option<NonZeroUsize>,
 }
 
 struct GlobalRangeArgs {
@@ -324,9 +338,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             args.each,
             args.format,
             args.sequence_type,
+            args.threads,
         )?,
         SubCommand::Composition(args) => {
-            composition::run(args.input.as_deref(), args.sequence_type)?
+            composition::run(args.input.as_deref(), args.sequence_type, args.threads)?
         }
         SubCommand::Get(args) => get::run(args)?,
         SubCommand::Filter(args) => filter::run(args)?,
@@ -369,7 +384,7 @@ fn len(args: LenArgs) -> Result<(), Box<dyn std::error::Error>> {
             // SAFETY: Input files must remain unchanged for the duration of this command;
             // this command only reads the file and never modifies it.
             let lines = unsafe { read_lines_from_file(input)? };
-            count_sequence_bases_from_file(&lines, args.sequence_type)?
+            count_sequence_bases_from_file(&lines, args.sequence_type, args.threads)?
         }
         None => count_sequence_bases_for(read_lines_from_stdin(), args.sequence_type)?,
     };
@@ -447,12 +462,37 @@ where
 fn count_sequence_bases_from_file(
     lines: &LinesInFile,
     sequence_type: SequenceType,
+    requested_threads: Option<NonZeroUsize>,
 ) -> io::Result<u64> {
-    let mut count = 0u64;
-    lines.try_for_each_line(|line_number, line| {
-        count_sequence_line(line_number, line, &mut count, sequence_type)
-    })?;
-    Ok(count)
+    let bytes = lines.as_bytes();
+    let chunks = parallel::line_chunks(
+        bytes,
+        parallel::worker_count(bytes.len(), requested_threads),
+    );
+    let partials = parallel::process_chunks(&chunks, |chunk| {
+        let mut count = 0u64;
+        for (line_index, line) in chunk
+            .bytes
+            .split_inclusive(|byte| *byte == b'\n')
+            .enumerate()
+        {
+            count_sequence_line(
+                chunk.start_line + line_index,
+                line,
+                &mut count,
+                sequence_type,
+            )?;
+        }
+        Ok(count)
+    });
+
+    let mut total = 0u64;
+    for partial in partials {
+        total = total.checked_add(partial?).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "sequence length overflow")
+        })?;
+    }
+    Ok(total)
 }
 
 fn count_sequence_line(

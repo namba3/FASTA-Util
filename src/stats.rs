@@ -1,8 +1,8 @@
 use crate::{
     LinesInFile, StatsFormat, StatsSequenceType, for_each_reader_line, is_amino_acid,
-    is_nucleic_acid, read_lines_from_file, strip_line_ending,
+    is_nucleic_acid, parallel, read_lines_from_file, strip_line_ending,
 };
-use std::{fs::File, io, path::Path};
+use std::{fs::File, io, num::NonZeroUsize, path::Path};
 
 #[derive(Default)]
 struct RecordStats {
@@ -48,6 +48,7 @@ pub(super) fn run(
     each: bool,
     format: StatsFormat,
     sequence_type: StatsSequenceType,
+    threads: Option<NonZeroUsize>,
 ) -> io::Result<()> {
     let summary = match path {
         None => {
@@ -63,7 +64,7 @@ pub(super) fn run(
             // SAFETY: This command only reads the input; the file must not be modified
             // while the memory map is alive.
             let lines = unsafe { read_lines_from_file(file)? };
-            collect_stats(&lines, sequence_type, each)?
+            collect_stats(&lines, sequence_type, each, threads)?
         }
     };
     let kind = sequence_kind(&summary, sequence_type);
@@ -81,10 +82,31 @@ fn collect_stats(
     lines: &LinesInFile,
     sequence_type: StatsSequenceType,
     each: bool,
+    requested_threads: Option<NonZeroUsize>,
 ) -> io::Result<Summary> {
-    let mut collector = StatsCollector::new(sequence_type, each);
-    lines.try_for_each_line(|line_number, line| collector.process_line(line_number, line))?;
-    collector.finish()
+    let bytes = lines.as_bytes();
+    let chunks = parallel::record_chunks(
+        bytes,
+        parallel::worker_count(bytes.len(), requested_threads),
+    );
+    let partials = parallel::process_chunks(&chunks, |chunk| {
+        let mut collector = StatsCollector::new(sequence_type, each);
+        for (line_index, line) in chunk
+            .bytes
+            .split_inclusive(|byte| *byte == b'\n')
+            .enumerate()
+        {
+            collector.process_line(chunk.start_line + line_index, line)?;
+        }
+        collector.finish(false)
+    });
+
+    let mut summary = Summary::default();
+    for partial in partials {
+        merge_summary(&mut summary, partial?, each)?;
+    }
+    compute_n50(&mut summary);
+    Ok(summary)
 }
 
 fn collect_stats_from_reader(
@@ -96,7 +118,7 @@ fn collect_stats_from_reader(
     for_each_reader_line(reader, |line_number, line| {
         collector.process_line(line_number, line)
     })?;
-    collector.finish()
+    collector.finish(true)
 }
 
 impl StatsCollector {
@@ -203,7 +225,7 @@ impl StatsCollector {
         Ok(())
     }
 
-    fn finish(mut self) -> io::Result<Summary> {
+    fn finish(mut self, calculate_n50: bool) -> io::Result<Summary> {
         if let Some((record, counts)) = self.current {
             add_record(&mut self.summary, record, counts, self.each)?;
         }
@@ -213,19 +235,8 @@ impl StatsCollector {
                 "no FASTA records found",
             ));
         }
-        if !self.each {
-            self.summary
-                .lengths
-                .sort_unstable_by(|left, right| right.cmp(left));
-            let threshold = self.summary.total_length / 2 + self.summary.total_length % 2;
-            let mut cumulative = 0u64;
-            for &length in &self.summary.lengths {
-                cumulative += length;
-                if cumulative >= threshold {
-                    self.summary.n50 = length;
-                    break;
-                }
-            }
+        if !self.each && calculate_n50 {
+            compute_n50(&mut self.summary);
         }
         Ok(self.summary)
     }
@@ -272,6 +283,57 @@ fn add_record(
         summary.lengths.push(counts.length);
     }
     Ok(())
+}
+
+fn merge_summary(summary: &mut Summary, partial: Summary, each: bool) -> io::Result<()> {
+    summary.record_count = summary
+        .record_count
+        .checked_add(partial.record_count)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "record count overflow"))?;
+    summary.total_length = summary
+        .total_length
+        .checked_add(partial.total_length)
+        .ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "total sequence length overflow")
+        })?;
+    summary.total_gc = summary
+        .total_gc
+        .checked_add(partial.total_gc)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "GC count overflow"))?;
+    summary.total_n = summary
+        .total_n
+        .checked_add(partial.total_n)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "N count overflow"))?;
+    if summary.record_count == partial.record_count {
+        summary.min_length = partial.min_length;
+    } else {
+        summary.min_length = summary.min_length.min(partial.min_length);
+    }
+    summary.max_length = summary.max_length.max(partial.max_length);
+    summary.saw_t |= partial.saw_t;
+    summary.saw_u |= partial.saw_u;
+    summary.saw_protein_only |= partial.saw_protein_only;
+    if each {
+        summary.records.extend(partial.records);
+    } else {
+        summary.lengths.extend(partial.lengths);
+    }
+    Ok(())
+}
+
+fn compute_n50(summary: &mut Summary) {
+    summary
+        .lengths
+        .sort_unstable_by(|left, right| right.cmp(left));
+    let threshold = summary.total_length / 2 + summary.total_length % 2;
+    let mut cumulative = 0u64;
+    for &length in &summary.lengths {
+        cumulative += length;
+        if cumulative >= threshold {
+            summary.n50 = length;
+            break;
+        }
+    }
 }
 
 fn checked_add(value: u64, addition: u64, line_number: usize, message: &str) -> io::Result<u64> {

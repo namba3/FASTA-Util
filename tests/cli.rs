@@ -114,6 +114,25 @@ fn indexed_fasta_with_layout(
     )
 }
 
+fn multirecord_parallel_fixture(invalid_last_record: bool) -> TemporaryFile {
+    let mut fasta = Vec::new();
+    for record in 0..20 {
+        let line_ending: &[u8] = if record % 2 == 0 { b"\n" } else { b"\r\n" };
+        fasta.extend_from_slice(format!(">record-{record} description").as_bytes());
+        fasta.extend_from_slice(line_ending);
+
+        let mut sequence = b"ACGTN".repeat(32);
+        if invalid_last_record && record == 19 {
+            sequence[3] = b'?';
+        }
+        for line in sequence.chunks(40) {
+            fasta.extend_from_slice(line);
+            fasta.extend_from_slice(line_ending);
+        }
+    }
+    TemporaryFile::new(&fasta)
+}
+
 fn run_fasta_util(args: &[&str], input: &[u8]) -> Output {
     run_fasta_util_with(input, |command| {
         command.args(args);
@@ -1816,6 +1835,77 @@ fn len_counts_lowercase_soft_masked_bases_from_a_file() {
     assert!(output.status.success());
     assert_eq!(output.stdout, b"7\n");
     assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn parallel_analysis_commands_match_single_worker_results() {
+    let input = multirecord_parallel_fixture(false);
+
+    let len_single = run_fasta_util(&["len", "-i", input.path(), "--threads", "1"], b"");
+    let len_parallel = run_fasta_util(&["len", "-i", input.path(), "--threads", "4"], b"");
+    assert!(len_single.status.success());
+    assert!(len_parallel.status.success());
+    assert_eq!(len_parallel.stdout, len_single.stdout);
+    assert_eq!(len_parallel.stderr, len_single.stderr);
+
+    let composition_single = run_fasta_util(&["composition", input.path(), "--threads", "1"], b"");
+    let composition_parallel =
+        run_fasta_util(&["composition", input.path(), "--threads", "4"], b"");
+    assert!(composition_single.status.success());
+    assert!(composition_parallel.status.success());
+    assert_eq!(composition_parallel.stdout, composition_single.stdout);
+    assert_eq!(composition_parallel.stderr, composition_single.stderr);
+
+    for options in [&[][..], &["--each"][..], &["--format", "json"][..]] {
+        let mut single_args = vec!["stats", input.path(), "--threads", "1"];
+        single_args.extend_from_slice(options);
+        let mut parallel_args = vec!["stats", input.path(), "--threads", "4"];
+        parallel_args.extend_from_slice(options);
+        let stats_single = run_fasta_util(&single_args, b"");
+        let stats_parallel = run_fasta_util(&parallel_args, b"");
+        assert!(stats_single.status.success());
+        assert!(stats_parallel.status.success());
+        assert_eq!(stats_parallel.stdout, stats_single.stdout);
+        assert_eq!(stats_parallel.stderr, stats_single.stderr);
+    }
+}
+
+#[test]
+fn parallel_analysis_commands_report_global_line_for_late_invalid_symbols() {
+    let input = multirecord_parallel_fixture(true);
+
+    for (command, args) in [
+        ("len", vec!["-i", input.path()]),
+        ("composition", vec![input.path()]),
+        ("stats", vec![input.path()]),
+    ] {
+        let mut single_args = vec![command];
+        single_args.extend_from_slice(&args);
+        single_args.extend_from_slice(&["--threads", "1"]);
+        let mut parallel_args = vec![command];
+        parallel_args.extend_from_slice(&args);
+        parallel_args.extend_from_slice(&["--threads", "4"]);
+
+        let single = run_fasta_util(&single_args, b"");
+        let parallel = run_fasta_util(&parallel_args, b"");
+        assert!(
+            !single.status.success(),
+            "{command} unexpectedly accepted invalid input"
+        );
+        assert!(
+            !parallel.status.success(),
+            "{command} unexpectedly accepted invalid input"
+        );
+        assert_eq!(
+            parallel.stderr, single.stderr,
+            "{command} changed its diagnostic"
+        );
+        assert!(
+            String::from_utf8_lossy(&parallel.stderr).contains("line 97:"),
+            "{command}: {}",
+            String::from_utf8_lossy(&parallel.stderr)
+        );
+    }
 }
 
 #[cfg(unix)]

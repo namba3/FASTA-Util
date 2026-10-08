@@ -85,6 +85,11 @@ impl Iterator for LinesInFile {
     }
 }
 impl LinesInFile {
+    /// Borrows the complete read-only memory-mapped input.
+    pub fn as_bytes(&self) -> &[u8] {
+        self.mmap.as_deref().map_or(&[], |mmap| &mmap[..])
+    }
+
     /// Visits each line by borrowing the mapped bytes, without cloning the mapping.
     ///
     /// `line_number` is one-based. A line includes its trailing newline when present.
