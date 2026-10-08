@@ -26,49 +26,75 @@ The recorded run used 20,000,000 symbols and five timed runs per case, following
 
 `BASES` must be at least 10,011,000 so the benchmark region exists in record 201.
 
-Before measurement the script checked file/stdin output equality for `stats`, `composition`, `filter`, `revcomp`, `format`, and `validate`; checked that `get` returned identical bytes with and without an index; and exercised nucleotide and protein validation/statistics. The `get` region was `record_000201:1001-11000`, which is 10 kb inside a later record. The index was created before timing `get`; the standalone `index` case writes a fresh sidecar on each run.
+Before measurement the script checked file/stdin output equality for `stats`, `composition`, `filter`, `revcomp`, `format`, and `validate`; checked output equality for `len`, `stats`, and `composition` with 1, 2, 4, and automatic worker settings; checked that `get` returned identical bytes with and without an index; and exercised nucleotide and protein validation/statistics. The `get` region was `record_000201:1001-11000`, which is 10 kb inside a later record. The index was created before timing `get`; the standalone `index` case writes a fresh sidecar on each run.
 
 Times below are mean ± standard deviation from hyperfine. The `get` index result is near the process-startup floor, so treat small absolute differences cautiously.
 
 | Command | Mean ± σ |
 | --- | ---: |
-| `len` (nucleotide) | 14.7 ± 1.1 ms |
-| `validate` (nucleotide) | 103.1 ± 2.4 ms |
-| `validate` (protein) | 26.5 ± 1.1 ms |
-| `index` (400 records) | 17.6 ± 3.0 ms |
-| `stats` (nucleotide) | 117.9 ± 1.0 ms |
-| `stats` (protein) | 44.2 ± 3.7 ms |
-| `composition` (nucleotide) | 48.1 ± 1.2 ms |
-| `composition` (protein) | 45.6 ± 3.0 ms |
-| `get` (scan, 10 kb) | 13.7 ± 0.7 ms |
-| `get` (FAI, 10 kb) | 1.3 ± 0.3 ms |
-| `filter` (nucleotide) | 84.7 ± 4.3 ms |
-| `filter` (protein) | 49.8 ± 3.3 ms |
-| `revcomp` | 224.9 ± 10.7 ms |
-| `grep` | 23.2 ± 5.1 ms |
-| `locate` (4-base motif, 1 mismatch allowed) | 668.9 ± 23.2 ms |
-| `format` (width 60) | 41.5 ± 3.3 ms |
+| `len` (nucleotide) | 12.9 ± 1.4 ms |
+| `validate` (nucleotide) | 107.3 ± 4.0 ms |
+| `validate` (protein) | 29.8 ± 2.4 ms |
+| `index` (400 records) | 13.8 ± 0.2 ms |
+| `stats` (nucleotide) | 51.1 ± 3.5 ms |
+| `stats` (protein) | 41.3 ± 3.6 ms |
+| `composition` (nucleotide) | 24.3 ± 3.5 ms |
+| `composition` (protein) | 21.8 ± 0.6 ms |
+| `get` (scan, 10 kb) | 11.4 ± 0.6 ms |
+| `get` (FAI, 10 kb) | 1.9 ± 0.2 ms |
+| `filter` (nucleotide) | 42.1 ± 4.0 ms |
+| `filter` (protein) | 40.4 ± 1.4 ms |
+| `revcomp` | 62.4 ± 4.2 ms |
+| `grep` | 14.5 ± 0.9 ms |
+| `locate` (4-base motif, 1 mismatch allowed) | 649.8 ± 15.4 ms |
+| `format` (width 60) | 21.0 ± 2.1 ms |
 
 | Standard-input / pipeline case | Mean ± σ |
 | --- | ---: |
-| `stats` (stdin) | 183.4 ± 7.9 ms |
-| `composition` (stdin) | 91.1 ± 2.7 ms |
-| `filter` (stdin) | 115.6 ± 6.6 ms |
-| `revcomp` (stdin) | 259.0 ± 9.8 ms |
-| `format` (stdin) | 80.2 ± 7.1 ms |
-| `validate` (stdin) | 169.3 ± 6.8 ms |
-| `filter | revcomp | stats` | 390.6 ± 16.2 ms |
+| `stats` (stdin) | 183.8 ± 4.0 ms |
+| `composition` (stdin) | 91.6 ± 1.2 ms |
+| `filter` (stdin) | 59.4 ± 4.2 ms |
+| `revcomp` (stdin) | 78.9 ± 7.8 ms |
+| `format` (stdin) | 39.4 ± 5.3 ms |
+| `validate` (stdin) | 167.1 ± 8.6 ms |
+| `filter | revcomp | stats` | 275.0 ± 10.3 ms |
 
 `grep` had higher run-to-run variation than most cases in this sample. The indexed `get` case is below 5 ms, where hyperfine warns that shell startup calibration limits timing accuracy.
 
+## Analysis worker-count comparison
+
+`benchmark_commands.sh` also compares `len`, `stats`, and `composition` on file input with 1, 2, and 4 workers, plus automatic settings. Automatic mode processes files smaller than 8 MiB sequentially; larger files use up to 4 workers, limited by available CPUs. `stats` splits work at record boundaries, so this 400-record input can use multiple workers.
+
+The table below uses the same 20-million-base, 400-record nucleotide FASTA as above. Each case had one warmup and five measured runs; output was discarded.
+
+| Command | 1 worker | 2 workers | 4 workers | Automatic |
+| --- | ---: | ---: | ---: | ---: |
+| `len` | 19.6 ± 2.4 ms | 14.8 ± 1.5 ms | 12.2 ± 0.9 ms | 12.4 ± 1.1 ms |
+| `stats` | 157.1 ± 3.5 ms | 81.7 ± 3.2 ms | 49.6 ± 4.3 ms | 52.3 ± 5.2 ms |
+| `composition` | 50.5 ± 2.4 ms | 34.3 ± 5.0 ms | 23.9 ± 1.1 ms | 21.1 ± 0.8 ms |
+
+On this input and host, four workers were about 1.6× faster for `len`, 3.2× for `stats`, and 2.1× for `composition` than one worker. Automatic mode was close to the four-worker result. These are measurements with a warm page cache on one machine; CPU load, record count, and record-length skew affect results. Since `stats` partitions by record, one-record FASTA files remain sequential.
+
 ## RefSeq GRCh38.p14 dataset
 
-The remeasurement used `dataset/ncbi_dataset/data/GCF_000001405.40/GCF_000001405.40_GRCh38.p14_genomic.fna` (3,339,739,109 bytes, 705 records, 3,298,430,636 sequence symbols). The chromosome 1 record `NC_000001.11` has 248,956,422 bases. The benchmark preserved lowercase soft masking. The scan path passed `--no-fai-index`, and the indexed path passed `--fai-index` explicitly; their outputs were compared byte-for-byte before timing. Each case had one warmup and five measured runs. `seqkit stats` and `fasta-util len` reported the same total sequence length.
+The remeasurement used `dataset/ncbi_dataset/data/GCF_000001405.40/GCF_000001405.40_GRCh38.p14_genomic.fna` (3,339,739,109 bytes, 705 records, 3,298,430,636 sequence symbols). The chromosome 1 record `NC_000001.11` has 248,956,422 bases. The benchmark preserved lowercase soft masking. The scan path passed `--no-fai-index`, and the indexed path passed `--fai-index` explicitly; their outputs were compared byte-for-byte before timing. The `get` cases had one warmup and five measured runs. Whole-assembly `len`, `stats`, and `composition` had one warmup and three measured runs; outputs from one worker and automatic mode also matched for all three commands.
 
 | Command | Result | Mean ± σ |
 | --- | ---: | ---: |
-| `seqkit stats` (whole assembly) | 705 records, 3,298,430,636 bases | 1.700 ± 0.083 s |
-| `fasta-util len` (whole assembly) | 3,298,430,636 bases | 2.133 ± 0.134 s |
+| `seqkit stats` (whole assembly) | 705 records, 3,298,430,636 bases | 1.617 ± 0.021 s |
+| `fasta-util len` (whole assembly, automatic workers) | 3,298,430,636 bases | 1.046 ± 0.020 s |
+
+### Whole-assembly worker-count comparison
+
+The table below measures the same 3.3 GB FASTA with 1, 2, and 4 workers, plus automatic settings. Hyperfine used one warmup and three measured runs per case. Times are mean ± standard deviation.
+
+| Command | 1 worker | 2 workers | 4 workers | Automatic |
+| --- | ---: | ---: | ---: | ---: |
+| `len` | 1.504 ± 0.013 s | 1.211 ± 0.050 s | 1.054 ± 0.063 s | 1.046 ± 0.020 s |
+| `stats` | 18.067 ± 0.527 s | 10.300 ± 0.116 s | 6.377 ± 0.031 s | 6.512 ± 0.115 s |
+| `composition` | 7.089 ± 0.226 s | 4.454 ± 0.116 s | 2.783 ± 0.062 s | 2.811 ± 0.075 s |
+
+Four workers were about 1.4× faster than one worker for `len`, 2.8× for `stats`, and 2.5× for `composition`. `stats` splits on record boundaries and distributes the dataset's 705 records across workers. These runs used a warm page cache. Hyperfine reported an outlier warning for the four-worker `composition` case, so treat small differences cautiously.
 
 `get` results below are for chromosome 1. The offset is zero-based within the input for describing the selected region; the command uses 1-based inclusive coordinates. Output was wrapped at 60 bases per line.
 
@@ -107,21 +133,21 @@ This comparison script requires SeqKit, stable Rust, `hyperfine`, and `awk`.
 
 The recorded run used a deterministic 20-million-base FASTA with 533 records of alternating 25 kb and 50 kb lengths. The generated IUPAC ambiguity symbols were mapped to `A`, leaving canonical DNA, so `locate` measured equivalent literal-motif behavior. Before timing, the script compared selected/filter, reverse-complement, header-search, formatting, locate coordinates/strands, and indexed-region outputs. It also checked that `len` and SeqKit's `sum_len` agreed. All timed output was discarded. Each case used one warmup and five runs.
 
-SeqKit's default parallelism is four threads; `fasta-util` processes these inputs in its streaming path. The commands use each tool's normal defaults otherwise. `stats`/`stats --all` calculate overlapping but not identical metric sets, and `len` versus `seqkit stats` compares only the total-length metric. `validate` and `composition` are not included because there is no direct SeqKit command with the same output contract. SeqKit documents the corresponding `stats`, `seq`, `grep`, `locate`, and `faidx` operations in its [usage guide](https://bioinf.shenwei.me/seqkit/usage/).
+SeqKit's default parallelism is four threads; `fasta-util` uses automatic workers for file-input `len`, `stats`, and `composition`. The commands use each tool's normal defaults otherwise. `stats`/`stats --all` calculate overlapping but not identical metric sets, and `len` versus `seqkit stats` compares only the total-length metric. `validate` and `composition` are not included because there is no direct SeqKit command with the same output contract. SeqKit documents the corresponding `stats`, `seq`, `grep`, `locate`, and `faidx` operations in its [usage guide](https://bioinf.shenwei.me/seqkit/usage/).
 
-The latest run includes a performance pass that reduces repeated per-base checks in `stats` and `filter`, avoids unneeded GC/N counting for length-only filtering, uses a lookup table for reverse complementation, and copies unchanged `format` sequence data in chunks. In same-host before/after measurements, `filter` changed from 106.8 ms to 39.2 ms, `revcomp` from 149.7 ms to 60.9 ms, and `format` from 54.5 ms to 28.2 ms. `stats` changed from 111.6 ms to 88.0 ms; it remains slower than SeqKit in this run, though the commands calculate different metric sets and SeqKit uses four threads. Benchmark results vary with machine load.
+In the current run, `fasta-util` uses automatic workers for `len`, `stats`, and `composition`. `stats` and SeqKit's `stats --all` report overlapping but different metrics; SeqKit uses four threads. Benchmark results vary with machine load.
 
 | Operation | `fasta-util` | SeqKit | Mean ± σ |
 | --- | ---: | ---: | ---: |
-| Total length | `len` | `stats` (`sum_len` only) | 15.3 ± 1.6 ms / 31.1 ± 2.5 ms |
-| Summary statistics | `stats` | `stats --all` | 88.0 ± 6.0 ms / 73.6 ± 5.4 ms |
-| Length filter (min 40 kb) | `filter` | `seq --min-len 40000` | 39.2 ± 3.3 ms / 37.2 ± 1.1 ms |
-| Reverse complement | `revcomp` | `seq --reverse --complement` | 60.9 ± 1.1 ms / 102.7 ± 4.7 ms |
-| Header search | `grep` | `grep --by-name --use-regexp` | 19.7 ± 1.0 ms / 48.1 ± 0.5 ms |
-| Motif location (`ACGA`) | `locate` | `locate` | 113.7 ± 3.0 ms / 143.4 ± 3.2 ms |
-| Rewrap to width 80 | `format` | `seq --line-width 80` | 28.2 ± 2.3 ms / 40.7 ± 4.9 ms |
-| Indexed extraction (10 kb) | `get` | `faidx` | 2.3 ± 0.3 ms / 22.2 ± 1.6 ms |
-| Index creation | `index` | `faidx --update-faidx` | 16.1 ± 1.5 ms / 50.6 ± 2.4 ms |
+| Total length | `len` | `stats` (`sum_len` only) | 12.0 ± 0.9 ms / 30.4 ± 1.9 ms |
+| Summary statistics | `stats` | `stats --all` | 35.0 ± 2.2 ms / 69.0 ± 6.7 ms |
+| Length filter (min 40 kb) | `filter` | `seq --min-len 40000` | 41.6 ± 3.9 ms / 36.1 ± 2.1 ms |
+| Reverse complement | `revcomp` | `seq --reverse --complement` | 60.7 ± 1.1 ms / 96.7 ± 4.9 ms |
+| Header search | `grep` | `grep --by-name --use-regexp` | 16.8 ± 2.2 ms / 43.0 ± 4.3 ms |
+| Motif location (`ACGA`) | `locate` | `locate` | 113.3 ± 3.8 ms / 141.9 ± 10.0 ms |
+| Rewrap to width 80 | `format` | `seq --line-width 80` | 20.0 ± 2.1 ms / 33.6 ± 1.6 ms |
+| Indexed extraction (10 kb) | `get` | `faidx` | 1.8 ± 0.4 ms / 25.2 ± 1.9 ms |
+| Index creation | `index` | `faidx --update-faidx` | 14.7 ± 0.7 ms / 52.1 ± 3.6 ms |
 
 The indexed extraction result for `fasta-util` is below 5 ms, where hyperfine warns that shell startup calibration limits timing accuracy. Results are environment-sensitive and should not be treated as a universal ranking.
 

@@ -101,6 +101,30 @@ cmp "$work_dir/get-scan.out" "$work_dir/get-indexed.out"
 "$binary" locate "$nucleotide" ACGT --max-mismatch 1 > "$work_dir/locate.out"
 "$binary" len -i "$nucleotide" > "$work_dir/len.out"
 
+run_analysis() {
+    local command="$1"
+    local threads="$2"
+    local output="$3"
+    local thread_args=()
+    if [[ "$threads" != "auto" ]]; then
+        thread_args=(--threads "$threads")
+    fi
+    case "$command" in
+        len) "$binary" len -i "$nucleotide" "${thread_args[@]}" > "$output" ;;
+        stats) "$binary" stats "$nucleotide" "${thread_args[@]}" > "$output" ;;
+        composition) "$binary" composition "$nucleotide" "${thread_args[@]}" > "$output" ;;
+    esac
+}
+
+# Check output parity before comparing worker counts.
+for subcommand in len stats composition; do
+    run_analysis "$subcommand" 1 "$work_dir/$subcommand-serial.out"
+    for threads in auto 2 4; do
+        run_analysis "$subcommand" "$threads" "$work_dir/$subcommand-$threads.out"
+        cmp "$work_dir/$subcommand-serial.out" "$work_dir/$subcommand-$threads.out"
+    done
+done
+
 q() { printf '%q' "$1"; }
 q_binary="$(q "$binary")"
 q_nucleotide="$(q "$nucleotide")"
@@ -138,3 +162,18 @@ printf '\n%s\n' 'Standard input and pipeline (1 warmup, output suppressed):'
     -n 'format (stdin)' "$q_cat $q_nucleotide | $q_binary format --width 60 > /dev/null" \
     -n 'validate (stdin)' "$q_cat $q_nucleotide | $q_binary validate > /dev/null" \
     -n 'filter | revcomp | stats' "$q_binary filter --min-len 1 $q_nucleotide | $q_binary revcomp | $q_binary stats > /dev/null"
+
+printf '\n%s\n' 'Analysis worker-count comparison (1 warmup, output suppressed):'
+"$hyperfine" --shell=bash --warmup 1 --runs "$runs" --style basic \
+    -n 'len (1 worker)' "$q_binary len -i $q_nucleotide --threads 1 > /dev/null" \
+    -n 'len (2 workers)' "$q_binary len -i $q_nucleotide --threads 2 > /dev/null" \
+    -n 'len (4 workers)' "$q_binary len -i $q_nucleotide --threads 4 > /dev/null" \
+    -n 'len (auto)' "$q_binary len -i $q_nucleotide > /dev/null" \
+    -n 'stats (1 worker)' "$q_binary stats $q_nucleotide --threads 1 > /dev/null" \
+    -n 'stats (2 workers)' "$q_binary stats $q_nucleotide --threads 2 > /dev/null" \
+    -n 'stats (4 workers)' "$q_binary stats $q_nucleotide --threads 4 > /dev/null" \
+    -n 'stats (auto)' "$q_binary stats $q_nucleotide > /dev/null" \
+    -n 'composition (1 worker)' "$q_binary composition $q_nucleotide --threads 1 > /dev/null" \
+    -n 'composition (2 workers)' "$q_binary composition $q_nucleotide --threads 2 > /dev/null" \
+    -n 'composition (4 workers)' "$q_binary composition $q_nucleotide --threads 4 > /dev/null" \
+    -n 'composition (auto)' "$q_binary composition $q_nucleotide > /dev/null"

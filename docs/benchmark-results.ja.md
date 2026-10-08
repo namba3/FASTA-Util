@@ -24,51 +24,77 @@ stable Rust、`hyperfine`、`awk`を用意し、リポジトリルートから�
 
 記録した測定では2000万記号、各ケース5回の計測を行い、その前に1回ウォームアップしました。`--seed 42`で生成した核酸FASTAは、5万塩基ずつの400レコードで、ファイルサイズは20,410,800 bytesでした。タンパク質FASTAは決定的な配列20,000,000記号、20,333,368 bytesです。出力は`/dev/null`へ捨てていますが、プロセス起動時間は測定に含まれます。標準入力ケースには`cat`とパイプの時間も含まれます。
 
-計測前に、`stats`・`composition`・`filter`・`revcomp`・`format`・`validate`のファイル入力と標準入力で出力が一致することを確認しました。`get`ではFAIの有無による出力一致も確認し、核酸・タンパク質の検証と統計コマンドを実行しました。対象範囲は後半レコードの`record_000201:1001-11000`です。`get`のFAIは計測前に作成し、独立した`index`ケースでは毎回FAIを書き込みます。
+計測前に、`stats`・`composition`・`filter`・`revcomp`・`format`・`validate`のファイル入力と標準入力で出力が一致することを確認しました。`len`・`stats`・`composition`は1 worker、2 worker、4 worker、自動設定で出力一致も確認しました。`get`ではFAIの有無による出力一致も確認し、核酸・タンパク質の検証と統計コマンドを実行しました。対象範囲は後半レコードの`record_000201:1001-11000`です。`get`のFAIは計測前に作成し、独立した`index`ケースでは毎回FAIを書き込みます。
 
 以下はhyperfineによる平均 ± 標準偏差です。FAIを使う`get`はプロセス起動時間に近いため、小さな時間差は参考値として扱ってください。
 
 | コマンド | 平均 ± 標準偏差 |
 | --- | ---: |
-| `len`（核酸） | 14.7 ± 1.1 ms |
-| `validate`（核酸） | 103.1 ± 2.4 ms |
-| `validate`（タンパク質） | 26.5 ± 1.1 ms |
-| `index`（400レコード） | 17.6 ± 3.0 ms |
-| `stats`（核酸） | 117.9 ± 1.0 ms |
-| `stats`（タンパク質） | 44.2 ± 3.7 ms |
-| `composition`（核酸） | 48.1 ± 1.2 ms |
-| `composition`（タンパク質） | 45.6 ± 3.0 ms |
-| `get`（FAIなし、10 kb） | 13.7 ± 0.7 ms |
-| `get`（FAIあり、10 kb） | 1.3 ± 0.3 ms |
-| `filter`（核酸） | 84.7 ± 4.3 ms |
-| `filter`（タンパク質） | 49.8 ± 3.3 ms |
-| `revcomp` | 224.9 ± 10.7 ms |
-| `grep` | 23.2 ± 5.1 ms |
-| `locate`（4記号モチーフ、不一致1を許容） | 668.9 ± 23.2 ms |
-| `format`（幅60） | 41.5 ± 3.3 ms |
+| `len`（核酸） | 12.9 ± 1.4 ms |
+| `validate`（核酸） | 107.3 ± 4.0 ms |
+| `validate`（タンパク質） | 29.8 ± 2.4 ms |
+| `index`（400レコード） | 13.8 ± 0.2 ms |
+| `stats`（核酸） | 51.1 ± 3.5 ms |
+| `stats`（タンパク質） | 41.3 ± 3.6 ms |
+| `composition`（核酸） | 24.3 ± 3.5 ms |
+| `composition`（タンパク質） | 21.8 ± 0.6 ms |
+| `get`（FAIなし、10 kb） | 11.4 ± 0.6 ms |
+| `get`（FAIあり、10 kb） | 1.9 ± 0.2 ms |
+| `filter`（核酸） | 42.1 ± 4.0 ms |
+| `filter`（タンパク質） | 40.4 ± 1.4 ms |
+| `revcomp` | 62.4 ± 4.2 ms |
+| `grep` | 14.5 ± 0.9 ms |
+| `locate`（4記号モチーフ、不一致1を許容） | 649.8 ± 15.4 ms |
+| `format`（幅60） | 21.0 ± 2.1 ms |
 
 | 標準入力・パイプ | 平均 ± 標準偏差 |
 | --- | ---: |
-| `stats`（stdin） | 183.4 ± 7.9 ms |
-| `composition`（stdin） | 91.1 ± 2.7 ms |
-| `filter`（stdin） | 115.6 ± 6.6 ms |
-| `revcomp`（stdin） | 259.0 ± 9.8 ms |
-| `format`（stdin） | 80.2 ± 7.1 ms |
-| `validate`（stdin） | 169.3 ± 6.8 ms |
-| `filter | revcomp | stats` | 390.6 ± 16.2 ms |
+| `stats`（stdin） | 183.8 ± 4.0 ms |
+| `composition`（stdin） | 91.6 ± 1.2 ms |
+| `filter`（stdin） | 59.4 ± 4.2 ms |
+| `revcomp`（stdin） | 78.9 ± 7.8 ms |
+| `format`（stdin） | 39.4 ± 5.3 ms |
+| `validate`（stdin） | 167.1 ± 8.6 ms |
+| `filter | revcomp | stats` | 275.0 ± 10.3 ms |
 
 この測定では`grep`のばらつきが他の多くのケースより大きくなりました。FAIを使う`get`は5 ms未満で、hyperfineからシェル起動時間の校正精度について警告が出ています。
+
+## 並列worker数の比較
+
+`benchmark_commands.sh`はファイル入力の`len`・`stats`・`composition`について、1・2・4 workerと自動設定を同じ入力で測ります。自動設定は8 MiB未満なら逐次処理し、それ以上では利用可能なCPU数に応じて最大4 workerを使います。`stats`はrecord境界で分割するため、recordが400件あるこの入力では複数workerを使えます。
+
+以下は上記と同じ2000万塩基・400レコードの核酸FASTAを使い、各条件を1回ウォームアップ後に5回測定した平均 ± 標準偏差です。出力は破棄しています。
+
+| コマンド | 1 worker | 2 workers | 4 workers | 自動設定 |
+| --- | ---: | ---: | ---: | ---: |
+| `len` | 19.6 ± 2.4 ms | 14.8 ± 1.5 ms | 12.2 ± 0.9 ms | 12.4 ± 1.1 ms |
+| `stats` | 157.1 ± 3.5 ms | 81.7 ± 3.2 ms | 49.6 ± 4.3 ms | 52.3 ± 5.2 ms |
+| `composition` | 50.5 ± 2.4 ms | 34.3 ± 5.0 ms | 23.9 ± 1.1 ms | 21.1 ± 0.8 ms |
+
+この入力と環境では、1 workerに対し4 workerで`len`は約1.6倍、`stats`は約3.2倍、`composition`は約2.1倍でした。自動設定も4 workerに近い結果です。これはページキャッシュが温まった状態の同一環境での値で、CPU負荷やFASTAのrecord数・長さの偏りで変わります。特に`stats`はrecord単位で分割するため、単一recordの巨大FASTAでは並列化されません。
 
 `BASES`は少なくとも10,011,000を指定してください。測定対象の領域が201番目のレコード内に必要です。
 
 ## RefSeq GRCh38.p14データセット
 
-`dataset/ncbi_dataset/data/GCF_000001405.40/GCF_000001405.40_GRCh38.p14_genomic.fna`を再測定に使用しました。ファイルは3,339,739,109 bytes、705レコードで、配列記号の合計は3,298,430,636です。第1染色体レコード`NC_000001.11`は248,956,422塩基です。小文字のソフトマスク配列は維持しました。隣接FAIがあっても走査する条件には`--no-fai-index`を指定し、FAI経路は`--fai-index`で明示しました。計測前に両経路の出力がバイト単位で一致することを確認しました。各ケースは1回ウォームアップした後、5回計測しています。`seqkit stats`と`fasta-util len`の総配列長は一致しました。
+`dataset/ncbi_dataset/data/GCF_000001405.40/GCF_000001405.40_GRCh38.p14_genomic.fna`を再測定に使用しました。ファイルは3,339,739,109 bytes、705レコードで、配列記号の合計は3,298,430,636です。第1染色体レコード`NC_000001.11`は248,956,422塩基です。小文字のソフトマスク配列は維持しました。隣接FAIがあっても走査する条件には`--no-fai-index`を指定し、FAI経路は`--fai-index`で明示しました。計測前に両経路の出力がバイト単位で一致することを確認しました。`get`は1回ウォームアップ後に5回、全ゲノムの`len`・`stats`・`composition`は1回ウォームアップ後に3回計測しました。全ゲノム3コマンドは1 workerと自動設定の出力も一致しました。
 
 | コマンド | 結果 | 平均 ± 標準偏差 |
 | --- | ---: | ---: |
-| `seqkit stats`（全ゲノム） | 705レコード、3,298,430,636塩基 | 1.700 ± 0.083 s |
-| `fasta-util len`（全ゲノム） | 3,298,430,636塩基 | 2.133 ± 0.134 s |
+| `seqkit stats`（全ゲノム） | 705レコード、3,298,430,636塩基 | 1.617 ± 0.021 s |
+| `fasta-util len`（全ゲノム、自動設定） | 3,298,430,636塩基 | 1.046 ± 0.020 s |
+
+### 全ゲノムでのworker数比較
+
+下表は3.3 GBの同じFASTAを、1 worker・2 worker・4 worker・自動設定で計測した平均 ± 標準偏差です。hyperfineのウォームアップは1回、計測は各3回です。
+
+| コマンド | 1 worker | 2 workers | 4 workers | 自動設定 |
+| --- | ---: | ---: | ---: | ---: |
+| `len` | 1.504 ± 0.013 s | 1.211 ± 0.050 s | 1.054 ± 0.063 s | 1.046 ± 0.020 s |
+| `stats` | 18.067 ± 0.527 s | 10.300 ± 0.116 s | 6.377 ± 0.031 s | 6.512 ± 0.115 s |
+| `composition` | 7.089 ± 0.226 s | 4.454 ± 0.116 s | 2.783 ± 0.062 s | 2.811 ± 0.075 s |
+
+4 workerでは1 workerより`len`が約1.4倍、`stats`が約2.8倍、`composition`が約2.5倍速くなりました。`stats`はrecord境界で分割し、このデータセットの705 recordsをworker間で処理します。計測は温まったページキャッシュ上で行いました。`composition`の4 worker測定にはhyperfineが外れ値の警告を出しているため、差の小さい値は参考値として扱ってください。
 
 以下は第1染色体からの`get`の結果です。オフセットは範囲を説明するための0始まりの値で、コマンドでは1始まり・両端を含む座標を使います。出力は1行60塩基で折り返しています。
 
@@ -109,19 +135,19 @@ stable Rust、`hyperfine`、`awk`を用意し、リポジトリルートから�
 
 SeqKitの既定スレッド数は4で、各ツールの既定設定で測定しています。`stats`と`stats --all`の統計項目は一部異なり、`len`と`seqkit stats`は総長だけを比較します。`validate`と`composition`には同じ出力仕様の直接対応コマンドがないため比較していません。SeqKit公式の[使用方法](https://bioinf.shenwei.me/seqkit/usage/)では、対応する`stats`・`seq`・`grep`・`locate`・`faidx`の機能を説明しています。
 
-今回の実装改善では、`stats`と`filter`の塩基ごとの重複チェックを減らし、長さだけで選別する場合はGC/Nを数えないようにしました。逆相補では変換表を使い、`format`は変換なしの入力をまとめてコピーします。同じ環境での改善前後の測定では、`filter`は106.8 msから39.2 ms、`revcomp`は149.7 msから60.9 ms、`format`は54.5 msから28.2 msになりました。`stats`は111.6 msから88.0 msに改善しましたが、今回のSeqKit比較ではまだ遅い結果です。`stats`と`stats --all`の項目は完全一致せず、SeqKitは4スレッドを使います。負荷により測定値は変動します。
+今回の測定では、`fasta-util`の`len`・`stats`・`composition`は既定で自動worker設定を使います。`stats`とSeqKitの`stats --all`は項目が完全一致せず、SeqKitは4スレッドを使います。測定値は負荷により変動します。
 
 | 処理 | `fasta-util` | SeqKit | 平均 ± 標準偏差 |
 | --- | ---: | ---: | ---: |
-| 総配列長 | `len` | `stats`（`sum_len`のみ） | 15.3 ± 1.6 ms / 31.1 ± 2.5 ms |
-| 統計 | `stats` | `stats --all` | 88.0 ± 6.0 ms / 73.6 ± 5.4 ms |
-| 長さフィルター（最小40 kb） | `filter` | `seq --min-len 40000` | 39.2 ± 3.3 ms / 37.2 ± 1.1 ms |
-| 逆相補 | `revcomp` | `seq --reverse --complement` | 60.9 ± 1.1 ms / 102.7 ± 4.7 ms |
-| ヘッダー検索 | `grep` | `grep --by-name --use-regexp` | 19.7 ± 1.0 ms / 48.1 ± 0.5 ms |
-| モチーフ位置（`ACGA`） | `locate` | `locate` | 113.7 ± 3.0 ms / 143.4 ± 3.2 ms |
-| 幅80に整形 | `format` | `seq --line-width 80` | 28.2 ± 2.3 ms / 40.7 ± 4.9 ms |
-| FAIを使う領域取得（10 kb） | `get` | `faidx` | 2.3 ± 0.3 ms / 22.2 ± 1.6 ms |
-| インデックス作成 | `index` | `faidx --update-faidx` | 16.1 ± 1.5 ms / 50.6 ± 2.4 ms |
+| 総配列長 | `len` | `stats`（`sum_len`のみ） | 12.0 ± 0.9 ms / 30.4 ± 1.9 ms |
+| 統計 | `stats` | `stats --all` | 35.0 ± 2.2 ms / 69.0 ± 6.7 ms |
+| 長さフィルター（最小40 kb） | `filter` | `seq --min-len 40000` | 41.6 ± 3.9 ms / 36.1 ± 2.1 ms |
+| 逆相補 | `revcomp` | `seq --reverse --complement` | 60.7 ± 1.1 ms / 96.7 ± 4.9 ms |
+| ヘッダー検索 | `grep` | `grep --by-name --use-regexp` | 16.8 ± 2.2 ms / 43.0 ± 4.3 ms |
+| モチーフ位置（`ACGA`） | `locate` | `locate` | 113.3 ± 3.8 ms / 141.9 ± 10.0 ms |
+| 幅80に整形 | `format` | `seq --line-width 80` | 20.0 ± 2.1 ms / 33.6 ± 1.6 ms |
+| FAIを使う領域取得（10 kb） | `get` | `faidx` | 1.8 ± 0.4 ms / 25.2 ± 1.9 ms |
+| インデックス作成 | `index` | `faidx --update-faidx` | 14.7 ± 0.7 ms / 52.1 ± 3.6 ms |
 
 `fasta-util`のFAI取得は5 ms未満で、hyperfineはシェル起動時間の校正精度に警告を出しています。測定値はこの環境における参考値です。
 
