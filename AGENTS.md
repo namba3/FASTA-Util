@@ -15,6 +15,12 @@
 - Keep the random-data helper independently runnable through its own manifest at `generate_random_data/Cargo.toml`.
 - Avoid adding dependencies when the standard library or existing crates are sufficient.
 
+## Code Review
+
+When performing a code review, read and follow [REVIEW.md](./REVIEW.md).
+These guidelines apply specifically to code review tasks. For regular development,
+follow the instructions in this file.
+
 ## Useful commands
 
 ```sh
